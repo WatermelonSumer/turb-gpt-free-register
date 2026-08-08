@@ -97,8 +97,12 @@ def _random_display_name() -> str:
     return random_display_name()
 
 
-def _prepare_registration_args() -> tuple[str, str, str]:
-    """复用 CLI 的默认规则，为旧 Web 任务入口补齐注册参数。"""
+def _prepare_registration_args(email_source=None) -> tuple[str, str, str]:
+    """
+    复用 CLI 的默认规则，为旧 Web 任务入口补齐注册参数。
+
+    email_source 来自任务记录：WebUI 注册页选了来源就用它，没选（None）则读配置。
+    """
     # 用模块属性读，支持 WebUI 热加载
     from config import register as _r, email as _e
     from core.email_provider import acquire_email
@@ -119,7 +123,7 @@ def _prepare_registration_args() -> tuple[str, str, str]:
     # 邮箱领取会把池状态置为 used，因此放在所有其他准备逻辑之后。
     if not email:
         if _e.USE_EMAIL_SERVICE:
-            email = acquire_email()
+            email = acquire_email(email_source)
         else:
             raise RuntimeError(
                 "手动模式未配置邮箱。请在 WebUI 配置页设置 REGISTER_EMAIL，"
@@ -298,7 +302,9 @@ def _run_one_job(job_id: int, log_file: str) -> None:
         with _JobLogContext(log_file):
             from main import run_registration
             log_logger.info(f"[Job {job_id}] 开始注册任务")
-            email, name, birthday = _prepare_registration_args()
+            # 用任务自己记录的来源，而不是当场读配置：这样重试会沿用提交时选的来源，
+            # 中途改配置也不会让同一批任务跑到别的池子上。
+            email, name, birthday = _prepare_registration_args(current.get("email_source"))
             db.update_job(job_id, email=email)
             check_stop_requested()
             result = run_registration(email=email, name=name, birthday=birthday)
@@ -430,7 +436,9 @@ def _run_codex_retry_job(job_id: int, log_file: str, email: str, account_id: int
 def submit_registration(count: int = 1, email_source: str | None = None, workers: int | None = None) -> list[dict]:
     """
     创建 N 个注册任务并提交到线程池。
-    email_source 仅记录到 DB；实际邮箱来源固定为 Outlook 账号池。
+
+    email_source 会记录到每个任务上，并在任务真正执行时决定从哪个邮箱池领邮箱
+    （见 _prepare_registration_args）。传 None 则用配置里的 EMAIL_SOURCE。
 
     Returns:
         N 个新创建的 job dict

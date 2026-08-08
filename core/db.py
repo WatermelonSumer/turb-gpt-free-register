@@ -30,6 +30,14 @@ _OUTLOOK_JSON = _PROJECT_ROOT / "用于注册的邮箱.json"
 _OUTLOOK_TXT = _PROJECT_ROOT / "用于注册的邮箱.txt"
 _GENERIC_API_EMAIL_JSON = _PROJECT_ROOT / "用于注册的API邮箱.json"
 _GENERIC_API_EMAIL_TXT = _PROJECT_ROOT / "用于注册的API邮箱.txt"
+# 孤独哥 CDK 池：存卡密本身；兑换出来的邮箱另存一份，一张卡对多个邮箱。
+_LONELY_CARD_JSON = _PROJECT_ROOT / "孤独哥CDK.json"
+_LONELY_CARD_TXT = _PROJECT_ROOT / "孤独哥CDK.txt"
+_LONELY_EMAIL_JSON = _PROJECT_ROOT / "孤独哥已兑换邮箱.json"
+# 孤独哥网页版：一张卡只兑换一个邮箱，所以卡和邮箱是一对一
+_LONELY_WEB_CARD_JSON = _PROJECT_ROOT / "孤独哥网页版CDK.json"
+_LONELY_WEB_CARD_TXT = _PROJECT_ROOT / "孤独哥网页版CDK.txt"
+_LONELY_WEB_EMAIL_JSON = _PROJECT_ROOT / "孤独哥网页版已兑换邮箱.json"
 _ACCOUNTS_JSON = _PROJECT_ROOT / "注册成功的邮箱.json"
 _ACCOUNTS_TXT = _PROJECT_ROOT / "注册成功的邮箱.txt"
 _TOKENS_TXT = _PROJECT_ROOT / "注册成功的token.txt"
@@ -481,6 +489,56 @@ def _save_generic_api_emails(rows: list[dict]) -> None:
         row["copy_line"] = _generic_api_email_line(row)
     _write_json(_GENERIC_API_EMAIL_JSON, rows)
     _sync_generic_api_email_txt(rows)
+
+
+def _load_lonely_cards() -> list[dict]:
+    rows = _read_json(_LONELY_CARD_JSON, [])
+    return rows if isinstance(rows, list) else []
+
+
+def _save_lonely_cards(rows: list[dict]) -> None:
+    _write_json(_LONELY_CARD_JSON, rows)
+    # TXT 只保留还有额度的卡密，方便复制回填
+    usable = [r for r in rows if r.get("status") == "available"]
+    lines = [str(r.get("card_code") or "") for r in sorted(usable, key=lambda x: int(x.get("id") or 0))]
+    _LONELY_CARD_TXT.write_text(("\n".join(lines) + ("\n" if lines else "")), encoding="utf-8")
+
+
+def _load_lonely_emails() -> list[dict]:
+    rows = _read_json(_LONELY_EMAIL_JSON, [])
+    return rows if isinstance(rows, list) else []
+
+
+def _save_lonely_emails(rows: list[dict]) -> None:
+    _write_json(_LONELY_EMAIL_JSON, rows)
+
+
+def _load_lonely_web_cards() -> list[dict]:
+    rows = _read_json(_LONELY_WEB_CARD_JSON, [])
+    return rows if isinstance(rows, list) else []
+
+
+def _save_lonely_web_cards(rows: list[dict]) -> None:
+    _write_json(_LONELY_WEB_CARD_JSON, rows)
+    usable = [r for r in rows if r.get("status") == "available"]
+    lines = [str(r.get("card_code") or "") for r in sorted(usable, key=lambda x: int(x.get("id") or 0))]
+    _LONELY_WEB_CARD_TXT.write_text(("\n".join(lines) + ("\n" if lines else "")), encoding="utf-8")
+
+
+def _load_lonely_web_emails() -> list[dict]:
+    rows = _read_json(_LONELY_WEB_EMAIL_JSON, [])
+    return rows if isinstance(rows, list) else []
+
+
+def _save_lonely_web_emails(rows: list[dict]) -> None:
+    _write_json(_LONELY_WEB_EMAIL_JSON, rows)
+
+
+def _find_lonely_card(rows: list[dict], card_code: str) -> dict | None:
+    target = str(card_code or "").strip().lower()
+    if not target:
+        return None
+    return next((r for r in rows if str(r.get("card_code") or "").strip().lower() == target), None)
 
 
 def _load_accounts() -> list[dict]:
@@ -1837,6 +1895,588 @@ def get_generic_api_email_by_email(email: str) -> dict | None:
     with _LOCK:
         row = _find_by_email(_load_generic_api_emails(), email)
         return _decorate_generic_api_email(row) if row else None
+
+
+# ============================================================
+# 孤独哥 CDK 池（卡密 → 兑换出邮箱）
+# ============================================================
+
+def import_lonely_cards(records: list[dict]) -> tuple[int, int]:
+    """
+    批量导入孤独哥 CDK。records 元素：{card_code[, base_url]}。
+    返回 (新增数, 跳过数)。卡密重复视为跳过。
+    """
+    with _LOCK:
+        rows = _load_lonely_cards()
+        inserted = skipped = 0
+        for raw in records:
+            card_code = str(raw.get("card_code") or raw.get("cdk") or "").strip()
+            if not card_code or _find_lonely_card(rows, card_code):
+                skipped += 1
+                continue
+            rows.append({
+                "id": _next_id(rows),
+                "card_code": card_code,
+                "base_url": str(raw.get("base_url") or "").strip(),
+                "api_key": "",
+                "api_secret": "",
+                "product_name": None,
+                "total_quota": None,
+                "used_quota": None,
+                "remaining_quota": None,
+                "expires_at": None,
+                "status": "available",
+                "redeemed_count": 0,
+                "note": None,
+                "imported_at": _now(),
+                "activated_at": None,
+            })
+            inserted += 1
+        _save_lonely_cards(rows)
+        return inserted, skipped
+
+
+def claim_next_lonely_card() -> dict | None:
+    """
+    领一张还有额度的 CDK。
+
+    与其它池不同：卡不会因为被领走就变 used —— 一张卡能兑换多个邮箱，
+    只有额度耗尽或卡失效才不可用。这里只做「可用性」判断。
+    """
+    with _LOCK:
+        rows = sorted(_load_lonely_cards(), key=lambda x: int(x.get("id") or 0))
+        for row in rows:
+            if row.get("status") != "available":
+                continue
+            remaining = row.get("remaining_quota")
+            # 没激活过时 remaining 为 None，按可用处理，激活后才知道真实额度。
+            if remaining is not None and int(remaining) <= 0:
+                continue
+            return dict(row)
+        return None
+
+
+def update_lonely_card_activation(
+    card_code: str,
+    *,
+    api_key: str = "",
+    api_secret: str = "",
+    product_name=None,
+    total_quota=None,
+    used_quota=None,
+    remaining_quota=None,
+    expires_at=None,
+) -> None:
+    """激活后回写卡密的密钥和额度信息。"""
+    with _LOCK:
+        rows = _load_lonely_cards()
+        row = _find_lonely_card(rows, card_code)
+        if row is None:
+            return
+        if api_key:
+            row["api_key"] = api_key
+        if api_secret:
+            row["api_secret"] = api_secret
+        if product_name is not None:
+            row["product_name"] = product_name
+        if total_quota is not None:
+            row["total_quota"] = total_quota
+        if used_quota is not None:
+            row["used_quota"] = used_quota
+        if remaining_quota is not None:
+            row["remaining_quota"] = remaining_quota
+            if int(remaining_quota) <= 0:
+                row["status"] = "exhausted"
+        if expires_at is not None:
+            row["expires_at"] = expires_at
+        row["activated_at"] = row.get("activated_at") or _now()
+        _save_lonely_cards(rows)
+
+
+def release_lonely_card(card_code: str, status: str = "available", note: str | None = None) -> None:
+    """改卡密状态：available / exhausted / failed / disabled。"""
+    with _LOCK:
+        rows = _load_lonely_cards()
+        row = _find_lonely_card(rows, card_code)
+        if row is None:
+            return
+        row["status"] = status
+        if note is not None:
+            row["note"] = note
+        _save_lonely_cards(rows)
+
+
+def delete_lonely_card(card_code: str) -> bool:
+    """删除一张 CDK；已兑换出来的邮箱记录保留，不跟着删。"""
+    with _LOCK:
+        rows = _load_lonely_cards()
+        target = str(card_code or "").strip().lower()
+        kept = [r for r in rows if str(r.get("card_code") or "").strip().lower() != target]
+        if len(kept) == len(rows):
+            return False
+        _save_lonely_cards(kept)
+        return True
+
+
+def get_lonely_card(card_code: str) -> dict | None:
+    with _LOCK:
+        row = _find_lonely_card(_load_lonely_cards(), card_code)
+        return dict(row) if row else None
+
+
+def lonely_card_pool_summary() -> dict:
+    """卡密维度汇总，另带剩余额度总和 —— 那才是真正还能注册多少个号。"""
+    with _LOCK:
+        out = {"available": 0, "exhausted": 0, "failed": 0}
+        remaining_total = 0
+        for row in _load_lonely_cards():
+            status = row.get("status") or "available"
+            out[status] = out.get(status, 0) + 1
+            if status == "available":
+                remaining = row.get("remaining_quota")
+                remaining_total += int(remaining) if remaining is not None else 0
+        out["total"] = sum(v for k, v in out.items() if k != "total")
+        out["remaining_quota"] = remaining_total
+        return out
+
+
+def _lonely_email_line(row: dict) -> str:
+    """复制行：邮箱----sessionId----卡密，方便人工核对来源。"""
+    return "----".join([
+        str(row.get("email") or ""),
+        str(row.get("session_id") or ""),
+        str(row.get("card_code") or ""),
+    ])
+
+
+def _decorate_lonely_email(row: dict, account_by_email: dict[str, dict] | None = None) -> dict:
+    """对齐邮箱池列表的字段形状，让前端不用为这个来源写特例。"""
+    out = dict(row)
+    out["copy_line"] = _lonely_email_line(out)
+    out["code_url"] = f"session:{out.get('session_id') or ''}"
+    out["password"] = out.get("password") or ""
+    out["client_id"] = out.get("client_id") or ""
+    out["refresh_token"] = out.get("refresh_token") or ""
+    account = None
+    if account_by_email is not None:
+        account = account_by_email.get((out.get("email") or "").lower())
+    if account:
+        out["registered_account_id"] = account.get("id")
+        out["access_token"] = account.get("access_token")
+        out["access_token_preview"] = (
+            (account.get("access_token") or "")[:40] + "..."
+            if account.get("access_token") else ""
+        )
+        out["account_copy_line"] = _account_line(account)
+        out["totp_secret"] = account.get("totp_secret")
+    return out
+
+
+def record_lonely_redeemed_email(
+    card_code: str,
+    email: str,
+    session_id: str,
+    remaining_quota=None,
+    session_expires_at=None,
+) -> dict:
+    """
+    记录一次 CDK 兑换结果：新增一条已兑换邮箱，并同步卡密的额度和计数。
+
+    邮箱直接落 used —— 兑换即消耗额度，不存在「兑换了但没用」再回收的情况。
+    """
+    with _LOCK:
+        rows = _load_lonely_emails()
+        existing = _find_by_email(rows, email)
+        if existing is not None:
+            existing["session_id"] = str(session_id or existing.get("session_id") or "")
+            existing["card_code"] = card_code or existing.get("card_code")
+            if session_expires_at is not None:
+                existing["session_expires_at"] = session_expires_at
+            _save_lonely_emails(rows)
+            row = dict(existing)
+        else:
+            row = {
+                "id": _next_id(rows),
+                "email": str(email or "").strip(),
+                "session_id": str(session_id or "").strip(),
+                "card_code": str(card_code or "").strip(),
+                "status": "used",
+                "used_at": _now(),
+                "note": None,
+                "redeemed_at": _now(),
+                "session_expires_at": session_expires_at,
+            }
+            rows.append(row)
+            _save_lonely_emails(rows)
+
+        # 同步卡密：剩余额度 + 已兑换计数
+        cards = _load_lonely_cards()
+        card = _find_lonely_card(cards, card_code)
+        if card is not None:
+            if remaining_quota is not None:
+                card["remaining_quota"] = remaining_quota
+                if int(remaining_quota) <= 0:
+                    card["status"] = "exhausted"
+            if existing is None:
+                card["redeemed_count"] = int(card.get("redeemed_count") or 0) + 1
+            _save_lonely_cards(cards)
+        return dict(row)
+
+
+def get_lonely_redeemed_email(email: str) -> dict | None:
+    with _LOCK:
+        row = _find_by_email(_load_lonely_emails(), email)
+        return dict(row) if row else None
+
+
+def release_lonely_redeemed_email(email: str, status: str = "available", note: str | None = None) -> None:
+    """
+    更新已兑换邮箱的状态。
+
+    额度已扣、邮箱无法退回服务端，所以 available 在这里没有「可再次领取」的含义，
+    统一落到 failed，避免调度层误以为这个邮箱能重新分配。
+    """
+    with _LOCK:
+        rows = _load_lonely_emails()
+        row = _find_by_email(rows, email)
+        if row is None:
+            return
+        row["status"] = "failed" if status == "available" else status
+        row["used_at"] = row.get("used_at") or _now()
+        if note is not None:
+            row["note"] = note
+        _save_lonely_emails(rows)
+
+
+def delete_lonely_redeemed_email(email: str) -> bool:
+    with _LOCK:
+        rows = _load_lonely_emails()
+        target = str(email or "").strip().lower()
+        kept = [r for r in rows if str(r.get("email") or "").strip().lower() != target]
+        if len(kept) == len(rows):
+            return False
+        _save_lonely_emails(kept)
+        return True
+
+
+def list_lonely_email_pool(status: str | None = None, limit: int = 500) -> list[dict]:
+    """已兑换邮箱列表 —— 前端邮箱池「孤独哥」标签展示的就是这个。"""
+    with _LOCK:
+        account_by_email = {
+            (a.get("email") or "").lower(): a for a in _load_accounts()
+        }
+        rows = _load_lonely_emails()
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
+        return [_decorate_lonely_email(r, account_by_email) for r in rows[:limit]]
+
+
+def list_lonely_card_pool(status: str | None = None, limit: int = 500) -> list[dict]:
+    """CDK 列表，带每张卡兑换出的邮箱，供前端展开显示。"""
+    with _LOCK:
+        emails_by_card: dict[str, list[dict]] = {}
+        for row in _load_lonely_emails():
+            key = str(row.get("card_code") or "").strip().lower()
+            emails_by_card.setdefault(key, []).append({
+                "email": row.get("email"),
+                "session_id": row.get("session_id"),
+                "status": row.get("status"),
+                "redeemed_at": row.get("redeemed_at"),
+            })
+
+        rows = _load_lonely_cards()
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
+
+        out = []
+        for row in rows[:limit]:
+            item = dict(row)
+            # 密钥不下发到前端，只给一个能看出「已激活」的短前缀
+            item["api_key_preview"] = (item.get("api_key") or "")[:12] + ("..." if item.get("api_key") else "")
+            item.pop("api_key", None)
+            item.pop("api_secret", None)
+            item["emails"] = emails_by_card.get(str(row.get("card_code") or "").strip().lower(), [])
+            out.append(item)
+        return out
+
+
+def lonely_email_pool_summary() -> dict:
+    """
+    邮箱维度汇总。available 是「还能兑换出多少个」= 卡的剩余额度总和，
+    这样前端「可用邮箱数」的语义和其它来源一致。
+    """
+    with _LOCK:
+        out = {"used": 0, "failed": 0}
+        for row in _load_lonely_emails():
+            status = row.get("status") or "used"
+            if status == "available":
+                status = "used"
+            out[status] = out.get(status, 0) + 1
+        remaining = 0
+        for card in _load_lonely_cards():
+            if card.get("status") != "available":
+                continue
+            value = card.get("remaining_quota")
+            remaining += int(value) if value is not None else 0
+        out["available"] = remaining
+        out["total"] = out["available"] + out["used"] + out["failed"]
+        return out
+
+
+# ============================================================
+# 孤独哥 CDK 网页版（一卡一邮箱）
+# ============================================================
+
+def import_lonely_web_cards(records: list[dict]) -> tuple[int, int]:
+    """批量导入网页版 CDK。records 元素：{card_code[, base_url]}。返回 (新增, 跳过)。"""
+    with _LOCK:
+        rows = _load_lonely_web_cards()
+        inserted = skipped = 0
+        for raw in records:
+            card_code = str(raw.get("card_code") or raw.get("cdk") or "").strip()
+            if not card_code or _find_lonely_card(rows, card_code):
+                skipped += 1
+                continue
+            rows.append({
+                "id": _next_id(rows),
+                "card_code": card_code,
+                "base_url": str(raw.get("base_url") or "").strip(),
+                "email": None,
+                "session_id": None,
+                "product_name": None,
+                "status": "available",
+                "note": None,
+                "imported_at": _now(),
+                "redeemed_at": None,
+            })
+            inserted += 1
+        _save_lonely_web_cards(rows)
+        return inserted, skipped
+
+
+def claim_next_lonely_web_card() -> dict | None:
+    """
+    原子领取一张未兑换的网页版卡并标记 used。
+
+    一张卡只能兑换一个邮箱，所以这里和 outlook 池一样是独占领取，
+    不同于额度卡版（那边一张卡可以反复领）。
+    """
+    with _LOCK:
+        rows = sorted(_load_lonely_web_cards(), key=lambda x: int(x.get("id") or 0))
+        row = next((r for r in rows if r.get("status") == "available"), None)
+        if row is None:
+            return None
+        row["status"] = "used"
+        row["redeemed_at"] = _now()
+        row["note"] = None
+        _save_lonely_web_cards(rows)
+        return dict(row)
+
+
+def release_lonely_web_card(card_code: str, status: str = "available", note: str | None = None) -> None:
+    """改网页版卡状态：available / used / failed / disabled。"""
+    with _LOCK:
+        rows = _load_lonely_web_cards()
+        row = _find_lonely_card(rows, card_code)
+        if row is None:
+            return
+        row["status"] = status
+        if status == "available":
+            row["redeemed_at"] = None
+        if note is not None:
+            row["note"] = note
+        _save_lonely_web_cards(rows)
+
+
+def get_lonely_web_card(card_code: str) -> dict | None:
+    with _LOCK:
+        row = _find_lonely_card(_load_lonely_web_cards(), card_code)
+        return dict(row) if row else None
+
+
+def delete_lonely_web_card(card_code: str) -> bool:
+    with _LOCK:
+        rows = _load_lonely_web_cards()
+        target = str(card_code or "").strip().lower()
+        kept = [r for r in rows if str(r.get("card_code") or "").strip().lower() != target]
+        if len(kept) == len(rows):
+            return False
+        _save_lonely_web_cards(kept)
+        return True
+
+
+def lonely_web_card_pool_summary() -> dict:
+    with _LOCK:
+        out = {"available": 0, "used": 0, "failed": 0}
+        for row in _load_lonely_web_cards():
+            status = row.get("status") or "available"
+            out[status] = out.get(status, 0) + 1
+        out["total"] = sum(v for k, v in out.items() if k != "total")
+        return out
+
+
+def list_lonely_web_card_pool(status: str | None = None, limit: int = 500) -> list[dict]:
+    """网页版 CDK 列表，带兑换出的邮箱（一对一，直接挂在卡上）。"""
+    with _LOCK:
+        emails_by_card = {
+            str(r.get("card_code") or "").strip().lower(): r
+            for r in _load_lonely_web_emails()
+        }
+        rows = _load_lonely_web_cards()
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
+        out = []
+        for row in rows[:limit]:
+            item = dict(row)
+            mail = emails_by_card.get(str(row.get("card_code") or "").strip().lower())
+            if mail:
+                item["email"] = mail.get("email") or item.get("email")
+                item["session_id"] = mail.get("session_id") or item.get("session_id")
+                item["email_status"] = mail.get("status")
+            out.append(item)
+        return out
+
+
+def _lonely_web_email_line(row: dict) -> str:
+    return "----".join([
+        str(row.get("email") or ""),
+        str(row.get("session_id") or ""),
+        str(row.get("card_code") or ""),
+    ])
+
+
+def _decorate_lonely_web_email(row: dict, account_by_email: dict[str, dict] | None = None) -> dict:
+    """字段形状对齐邮箱池列表，前端不用写特例。"""
+    out = dict(row)
+    out["copy_line"] = _lonely_web_email_line(out)
+    out["code_url"] = f"cdk:{out.get('card_code') or ''}"
+    out["password"] = out.get("password") or ""
+    out["client_id"] = out.get("client_id") or ""
+    out["refresh_token"] = out.get("refresh_token") or ""
+    account = None
+    if account_by_email is not None:
+        account = account_by_email.get((out.get("email") or "").lower())
+    if account:
+        out["registered_account_id"] = account.get("id")
+        out["access_token"] = account.get("access_token")
+        out["access_token_preview"] = (
+            (account.get("access_token") or "")[:40] + "..."
+            if account.get("access_token") else ""
+        )
+        out["account_copy_line"] = _account_line(account)
+        out["totp_secret"] = account.get("totp_secret")
+    return out
+
+
+def record_lonely_web_redeemed_email(
+    card_code: str,
+    email: str,
+    session_id: str,
+    product_name=None,
+    session_expires_at=None,
+) -> dict:
+    """记录网页版兑换结果，并把邮箱回写到卡上（前端卡片直接显示）。"""
+    with _LOCK:
+        rows = _load_lonely_web_emails()
+        existing = _find_by_email(rows, email)
+        if existing is not None:
+            existing["session_id"] = str(session_id or existing.get("session_id") or "")
+            existing["card_code"] = card_code or existing.get("card_code")
+            if session_expires_at is not None:
+                existing["session_expires_at"] = session_expires_at
+            _save_lonely_web_emails(rows)
+            row = dict(existing)
+        else:
+            row = {
+                "id": _next_id(rows),
+                "email": str(email or "").strip(),
+                "session_id": str(session_id or "").strip(),
+                "card_code": str(card_code or "").strip(),
+                "product_name": product_name,
+                "status": "used",
+                "used_at": _now(),
+                "note": None,
+                "redeemed_at": _now(),
+                "session_expires_at": session_expires_at,
+            }
+            rows.append(row)
+            _save_lonely_web_emails(rows)
+
+        cards = _load_lonely_web_cards()
+        card = _find_lonely_card(cards, card_code)
+        if card is not None:
+            card["email"] = row["email"]
+            card["session_id"] = row["session_id"]
+            if product_name is not None:
+                card["product_name"] = product_name
+            card["status"] = "used"
+            card["redeemed_at"] = card.get("redeemed_at") or _now()
+            _save_lonely_web_cards(cards)
+        return dict(row)
+
+
+def get_lonely_web_redeemed_email(email: str) -> dict | None:
+    with _LOCK:
+        row = _find_by_email(_load_lonely_web_emails(), email)
+        return dict(row) if row else None
+
+
+def release_lonely_web_redeemed_email(email: str, status: str = "available", note: str | None = None) -> None:
+    """卡已消耗，邮箱不能重新分配，available 统一落 failed。"""
+    with _LOCK:
+        rows = _load_lonely_web_emails()
+        row = _find_by_email(rows, email)
+        if row is None:
+            return
+        row["status"] = "failed" if status == "available" else status
+        row["used_at"] = row.get("used_at") or _now()
+        if note is not None:
+            row["note"] = note
+        _save_lonely_web_emails(rows)
+
+
+def delete_lonely_web_redeemed_email(email: str) -> bool:
+    with _LOCK:
+        rows = _load_lonely_web_emails()
+        target = str(email or "").strip().lower()
+        kept = [r for r in rows if str(r.get("email") or "").strip().lower() != target]
+        if len(kept) == len(rows):
+            return False
+        _save_lonely_web_emails(kept)
+        return True
+
+
+def list_lonely_web_email_pool(status: str | None = None, limit: int = 500) -> list[dict]:
+    with _LOCK:
+        account_by_email = {
+            (a.get("email") or "").lower(): a for a in _load_accounts()
+        }
+        rows = _load_lonely_web_emails()
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
+        return [_decorate_lonely_web_email(r, account_by_email) for r in rows[:limit]]
+
+
+def lonely_web_email_pool_summary() -> dict:
+    """
+    available = 还没兑换的卡数（一卡一邮箱，所以就是还能注册多少个号）。
+    """
+    with _LOCK:
+        out = {"used": 0, "failed": 0}
+        for row in _load_lonely_web_emails():
+            status = row.get("status") or "used"
+            if status == "available":
+                status = "used"
+            out[status] = out.get(status, 0) + 1
+        out["available"] = sum(
+            1 for c in _load_lonely_web_cards() if c.get("status") == "available"
+        )
+        out["total"] = out["available"] + out["used"] + out["failed"]
+        return out
 
 
 # ============================================================

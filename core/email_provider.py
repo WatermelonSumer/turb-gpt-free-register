@@ -18,7 +18,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-_VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail")
+_VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail", "lonely", "lonely_web")
 
 
 def parse_email_sources(value=None) -> list[str]:
@@ -65,13 +65,24 @@ def _pick_from_source(source: str) -> str:
     if source == "cloudmail":
         from core.cloudmail_client import pick_account
         return pick_account().email
+    if source == "lonely":
+        from core.lonely_mail_client import pick_account
+        return pick_account().email
+    if source == "lonely_web":
+        from core.lonely_web_client import pick_account
+        return pick_account().email
     from core.outlook_client import pick_account
     return pick_account().email
 
 
-def acquire_email() -> str:
-    """根据 EMAIL_SOURCE 领取一个用于注册的邮箱地址；多个来源时按顺序兜底。"""
-    sources = parse_email_sources()
+def acquire_email(source=None) -> str:
+    """
+    领取一个用于注册的邮箱地址；多个来源时按顺序兜底。
+
+    source 为 None 时读 EMAIL_SOURCE；传值则本次覆盖（WebUI 注册页下拉用这个），
+    不写回配置，所以 CLI 和其它任务不受影响。
+    """
+    sources = parse_email_sources(source)
     last_exc: Exception | None = None
     for source in sources:
         try:
@@ -101,6 +112,10 @@ def resolve_email_source(email: str) -> str:
         return "cloudmail"
 
     from core import db
+    if db.get_lonely_redeemed_email(email):
+        return "lonely"
+    if db.get_lonely_web_redeemed_email(email):
+        return "lonely_web"
     if db.get_generic_api_email_by_email(email):
         return "generic_api"
     if db.get_outlook_by_email(email):
@@ -175,6 +190,12 @@ def wait_for_otp(
     if source == "cloudmail":
         from core.cloudmail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "lonely":
+        from core.lonely_mail_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "lonely_web":
+        from core.lonely_web_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
     from core.outlook_client import fetch_latest_otp
     return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
 
@@ -200,6 +221,12 @@ def release_email(email: str, status: str = "available", note: str | None = None
     elif source == "cloudmail":
         from core.cloudmail_client import release_account
         release_account(email, status=status, note=note)
+    elif source == "lonely":
+        from core.lonely_mail_client import release_account
+        release_account(email, status=status, note=note)
+    elif source == "lonely_web":
+        from core.lonely_web_client import release_account
+        release_account(email, status=status, note=note)
     else:
         from core.outlook_client import release_account
         release_account(email, status=status, note=note)
@@ -214,7 +241,16 @@ def release_email_if_unconsumed(email: str, note: str | None = None) -> bool:
     source = resolve_email_source(email)
     from core import db
 
-    if source == "outlook":
+    if source in ("lonely", "lonely_web"):
+        # 卡已消耗、邮箱无法退回服务端，不存在「回收再用」；只标记状态。
+        if db.get_account_by_email(email) is not None:
+            return False
+        if source == "lonely":
+            db.release_lonely_redeemed_email(email, status="failed", note=note)
+        else:
+            db.release_lonely_web_redeemed_email(email, status="failed", note=note)
+        changed = True
+    elif source == "outlook":
         changed = db.release_unconsumed_outlook(email, note=note)
     elif source == "generic_api":
         changed = db.release_unconsumed_generic_api_email(email, note=note)

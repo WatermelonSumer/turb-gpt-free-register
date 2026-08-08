@@ -35,19 +35,34 @@ class GPTMailWebUiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["warning"], "")
         outlook_pool_summary.assert_not_called()
-        submit_registration.assert_called_once_with(count=1, workers=1)
+        self.assertEqual(submit_registration.call_count, 1)
+        self.assertEqual(submit_registration.call_args.kwargs["count"], 1)
+        self.assertEqual(submit_registration.call_args.kwargs["workers"], 1)
 
     @patch("webui.app.db.domain_email_pool_summary", return_value={"total": 0, "available": 0, "used": 0, "failed": 0})
     @patch("webui.app.db.outlook_pool_summary")
     @patch("webui.app.db.count_accounts", return_value=0)
     def test_summary_does_not_count_gptmail_as_outlook_pool(self, count_accounts, outlook_pool_summary, domain_pool_summary):
-        outlook_pool_summary.return_value = {"total": 0, "available": 0, "used": 0, "failed": 0}
+        """
+        gptmail 是按需生成的临时邮箱，不能把 outlook 池的数字当成它的容量。
+
+        注意：/api/summary 现在会读所有本地池来拼 per_source（注册页下拉按来源取数用），
+        所以这里断言的是「结果里不掺 outlook 的数」，而不是「没调用过 outlook 池」。
+        """
+        outlook_pool_summary.return_value = {"total": 7, "available": 5, "used": 2, "failed": 0}
         with patch.object(email_config, "EMAIL_SOURCE", "gptmail"):
             response = self.client.get("/api/summary")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["outlook_total"], 0)
-        outlook_pool_summary.assert_not_called()
+        body = response.get_json()
+        # 配置是 gptmail，outlook 的 7/5 不能漏进合计
+        self.assertEqual(body["outlook_total"], 0)
+        self.assertEqual(body["outlook_available"], 0)
+        self.assertEqual(body["configured_sources"], ["gptmail"])
+        # 临时邮箱标记为不限量，前端显示 ∞ 而不是 0
+        self.assertTrue(body["per_source"]["gptmail"]["unlimited"])
+        # outlook 的真实数字仍可单独查到（供注册页下拉切到 outlook 时显示）
+        self.assertEqual(body["per_source"]["outlook"]["available"], 5)
 
     @patch("webui.app.svc.submit_registration")
     def test_jobs_rejects_mailnest_without_api_key_before_creating_tasks(self, submit_registration):
@@ -77,7 +92,9 @@ class GPTMailWebUiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["warning"], "")
         outlook_pool_summary.assert_not_called()
-        submit_registration.assert_called_once_with(count=1, workers=1)
+        self.assertEqual(submit_registration.call_count, 1)
+        self.assertEqual(submit_registration.call_args.kwargs["count"], 1)
+        self.assertEqual(submit_registration.call_args.kwargs["workers"], 1)
 
     @patch("webui.app.svc.submit_registration")
     def test_jobs_allows_cloudmail_without_manual_domains(self, submit_registration):
@@ -91,7 +108,9 @@ class GPTMailWebUiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["warning"], "")
-        submit_registration.assert_called_once_with(count=1, workers=1)
+        self.assertEqual(submit_registration.call_count, 1)
+        self.assertEqual(submit_registration.call_args.kwargs["count"], 1)
+        self.assertEqual(submit_registration.call_args.kwargs["workers"], 1)
 
     @patch("webui.app.db.outlook_pool_summary")
     @patch("webui.app.svc.submit_registration", return_value=[{"id": 1}])
@@ -107,4 +126,6 @@ class GPTMailWebUiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["warning"], "")
         outlook_pool_summary.assert_not_called()
-        submit_registration.assert_called_once_with(count=1, workers=1)
+        self.assertEqual(submit_registration.call_count, 1)
+        self.assertEqual(submit_registration.call_args.kwargs["count"], 1)
+        self.assertEqual(submit_registration.call_args.kwargs["workers"], 1)

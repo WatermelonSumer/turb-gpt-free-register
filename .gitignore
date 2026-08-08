@@ -28,6 +28,14 @@ accounts_viewer.html
 # Cloudflare 域名邮箱池（运行时数据）
 用于注册的域名邮箱.json
 
+# 孤独哥 CDK 池（含卡密；额度卡版还存了 apiKey/apiSecret）
+孤独哥CDK.json
+孤独哥CDK.txt
+孤独哥已兑换邮箱.json
+孤独哥网页版CDK.json
+孤独哥网页版CDK.txt
+孤独哥网页版已兑换邮箱.json
+
 # 旧版数据/历史迁移残留
 data/
 

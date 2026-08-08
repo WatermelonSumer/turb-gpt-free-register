@@ -313,7 +313,17 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail",
+        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail,lonely,lonely_web",
+    },
+    {
+        "key": "LONELY_MAIL_BASE_URL", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "孤独哥 API 地址", "help": "默认 https://sms.iosmq.xyz；选择 lonely 来源时用。卡密在邮箱池按「孤独哥 CDK」导入，不填在这里",
+        "storage": "env",
+    },
+    {
+        "key": "LONELY_WEB_BASE_URL", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "孤独哥网页版地址", "help": "默认 https://sms.iosmq.xyz；选择 lonely_web 来源时用。网页版不签名，一张卡兑换一个邮箱",
+        "storage": "env",
     },
     {
         "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",

@@ -3,6 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff" id="themeColorMeta">
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('gpt_console_theme');
+        document.documentElement.dataset.theme = saved === 'dark' ? 'dark' : 'light';
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <title>GPT 注册控制台</title>
   <style>
     * { box-sizing: border-box; }
@@ -16,6 +27,27 @@
       --sidebar-width: 232px;
       --sidebar-accent: #3b66f5;
       --sidebar-accent-soft: #eef2ff;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      background-color: #000000;
+      --bg: #000000;
+      --surface: #000000;
+      --soft: #070707;
+      --text: #f5f5f5;
+      --muted: #a1a1aa;
+      --line: #242424;
+      --blue: #80aaff;
+      --green: #5edb91;
+      --red: #ff7f78;
+      --amber: #f2bb68;
+      --sidebar-accent: #8db4ff;
+      --sidebar-accent-soft: #101b2d;
+      --theme-control: #0a0a0a;
+      --theme-control-hover: #171717;
+      --theme-table-head: #080808;
+      --theme-table-hover: #0d0d0d;
+      --theme-border-strong: #303030;
     }
     body {
       margin: 0; max-width: 100%; overflow-x: clip;
@@ -318,6 +350,22 @@
       transition: background .15s ease, color .15s ease;
     }
     .sidebar-logout button:hover { color: #b3261e; background: #fff0ef; }
+    .theme-toggle {
+      width: 100%; display: flex; align-items: center; gap: 10px;
+      border: none; border-radius: 10px; padding: 10px 12px;
+      background: transparent; color: #64748b;
+      font: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; text-align: left;
+      transition: background .15s ease, color .15s ease;
+    }
+    .theme-toggle:hover { color: var(--sidebar-accent); background: var(--sidebar-accent-soft); }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--sidebar-accent); outline-offset: -2px;
+    }
+    .theme-toggle-icon { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; }
+    .theme-toggle-icon--moon { display: none; }
+    html[data-theme="dark"] .theme-toggle-icon--sun { display: none; }
+    html[data-theme="dark"] .theme-toggle-icon--moon { display: block; }
 
     /* ---- 新版注册区（工具条 + 表，旧区不改） ---- */
     .jobs-panel-v2 {
@@ -1810,6 +1858,383 @@
       .config-overview-v2-title { font-size: 24px; }
     }
 
+    /* OLED dark theme: the page and primary surfaces stay at true black. */
+    html[data-theme="dark"] body,
+    html[data-theme="dark"] main {
+      background-color: #000 !important;
+      color: var(--text) !important;
+    }
+    html[data-theme="dark"] .app-sidebar,
+    html[data-theme="dark"] .sidebar-brand,
+    html[data-theme="dark"] .sidebar-footer,
+    html[data-theme="dark"] section.card,
+    html[data-theme="dark"] .stat,
+    html[data-theme="dark"] .jobs-panel-v2,
+    html[data-theme="dark"] .accounts-panel-v2,
+    html[data-theme="dark"] .codex-panel-v2,
+    html[data-theme="dark"] .codex-stat-card,
+    html[data-theme="dark"] .outlook-panel-v2,
+    html[data-theme="dark"] .config-overview-v2,
+    html[data-theme="dark"] .config-nav-v2,
+    html[data-theme="dark"] .config-card-v2,
+    html[data-theme="dark"] .config-section-v2,
+    html[data-theme="dark"] .outlook-import-dialog,
+    html[data-theme="dark"] .roxy-workspace-box,
+    html[data-theme="dark"] #lonelyCardPanel {
+      background-color: #000 !important;
+      border-color: var(--line) !important;
+      box-shadow: none !important;
+    }
+    html[data-theme="dark"] .head,
+    html[data-theme="dark"] .toolbar,
+    html[data-theme="dark"] .jobs-toolbar-v2,
+    html[data-theme="dark"] .jobs-v2-pager,
+    html[data-theme="dark"] .accounts-filter-v2,
+    html[data-theme="dark"] #accountsToolbarV2,
+    html[data-theme="dark"] .codex-filter-v2,
+    html[data-theme="dark"] .outlook-filter-v2,
+    html[data-theme="dark"] .outlook-import-foot,
+    html[data-theme="dark"] .config-subtabs-v2,
+    html[data-theme="dark"] .acc-v2-btn-group,
+    html[data-theme="dark"] .config-switches-v2 + .config-section-v2-body {
+      background-color: var(--soft) !important;
+      border-color: var(--line) !important;
+    }
+    html[data-theme="dark"] table,
+    html[data-theme="dark"] table th,
+    html[data-theme="dark"] table td,
+    html[data-theme="dark"] .table-wrap,
+    html[data-theme="dark"] .jobs-table-v2-wrap,
+    html[data-theme="dark"] .accounts-table-v2-wrap,
+    html[data-theme="dark"] .codex-table-v2-wrap,
+    html[data-theme="dark"] .outlook-table-v2-wrap {
+      background-color: #000 !important;
+      color: #d6d6d6 !important;
+      border-color: #1d1d1d !important;
+    }
+    html[data-theme="dark"] table thead th,
+    html[data-theme="dark"] .jobs-table-v2 thead th,
+    html[data-theme="dark"] .accounts-table-v2 thead th,
+    html[data-theme="dark"] .codex-table-v2 thead th,
+    html[data-theme="dark"] .outlook-table-v2 thead th {
+      background-color: var(--theme-table-head) !important;
+      color: #a1a1aa !important;
+      border-color: #252525 !important;
+    }
+    html[data-theme="dark"] table tbody tr:hover td,
+    html[data-theme="dark"] .jobs-table-v2 tbody tr:hover td,
+    html[data-theme="dark"] .accounts-table-v2 tbody tr:hover td,
+    html[data-theme="dark"] .codex-table-v2 tbody tr:hover td,
+    html[data-theme="dark"] .outlook-table-v2 tbody tr:hover td {
+      background-color: var(--theme-table-hover) !important;
+    }
+    html[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
+    html[data-theme="dark"] textarea,
+    html[data-theme="dark"] select,
+    html[data-theme="dark"] .el-input-number,
+    html[data-theme="dark"] .acc-v2-search-wrap {
+      background-color: #000 !important;
+      color: #f5f5f5 !important;
+      border-color: var(--theme-border-strong) !important;
+      color-scheme: dark;
+    }
+    html[data-theme="dark"] option {
+      background-color: #000 !important;
+      color: #f5f5f5 !important;
+    }
+    html[data-theme="dark"] input::placeholder,
+    html[data-theme="dark"] textarea::placeholder {
+      color: #737373 !important;
+    }
+    html[data-theme="dark"] input:focus,
+    html[data-theme="dark"] textarea:focus,
+    html[data-theme="dark"] select:focus,
+    html[data-theme="dark"] .el-input-number:focus-within,
+    html[data-theme="dark"] .outlook-v2-select-btn:focus,
+    html[data-theme="dark"] .config-ep-select-btn:focus {
+      border-color: var(--blue) !important;
+      box-shadow: 0 0 0 3px rgba(128,170,255,.18) !important;
+      outline: none;
+    }
+    html[data-theme="dark"] .el-input-number__increase,
+    html[data-theme="dark"] .el-input-number__decrease {
+      background-color: #0b0b0b !important;
+      color: #a1a1aa !important;
+      border-color: #292929 !important;
+    }
+    html[data-theme="dark"] .el-input-number__increase:hover,
+    html[data-theme="dark"] .el-input-number__decrease:hover {
+      background-color: #171717 !important;
+      color: var(--blue) !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn,
+    html[data-theme="dark"] button.btn,
+    html[data-theme="dark"] .actions button,
+    html[data-theme="dark"] .pager-bar button,
+    html[data-theme="dark"] .jobs-v2-pager button,
+    html[data-theme="dark"] .pager-size-btn,
+    html[data-theme="dark"] .acc-v2-toggle,
+    html[data-theme="dark"] .acc-v2-more-btn,
+    html[data-theme="dark"] .acc-v2-actions > button,
+    html[data-theme="dark"] .config-nav-v2-item,
+    html[data-theme="dark"] .config-subtabs-v2 button,
+    html[data-theme="dark"] .config-ep-select-btn,
+    html[data-theme="dark"] .config-ep-select-item,
+    html[data-theme="dark"] .outlook-v2-select-btn,
+    html[data-theme="dark"] .outlook-v2-select-item,
+    html[data-theme="dark"] .outlook-import-foot .jobs-tb-btn {
+      background-color: var(--theme-control) !important;
+      color: #e5e5e5 !important;
+      border-color: var(--theme-border-strong) !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn:hover:not(:disabled),
+    html[data-theme="dark"] button.btn:hover:not(:disabled),
+    html[data-theme="dark"] .actions button:hover:not(:disabled),
+    html[data-theme="dark"] .pager-bar button:hover:not(:disabled),
+    html[data-theme="dark"] .jobs-v2-pager button:hover:not(:disabled),
+    html[data-theme="dark"] .acc-v2-toggle:hover,
+    html[data-theme="dark"] .acc-v2-more-btn:hover,
+    html[data-theme="dark"] .config-nav-v2-item:hover,
+    html[data-theme="dark"] .config-subtabs-v2 button:hover,
+    html[data-theme="dark"] .config-ep-select-item:hover,
+    html[data-theme="dark"] .outlook-v2-select-item:hover {
+      background-color: var(--theme-control-hover) !important;
+      color: #ffffff !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn--primary,
+    html[data-theme="dark"] button.btn.primary,
+    html[data-theme="dark"] .actions button.primary,
+    html[data-theme="dark"] .pager-page,
+    html[data-theme="dark"] .outlook-v2-select-item.is-active {
+      background-color: #356fe0 !important;
+      border-color: #356fe0 !important;
+      color: #ffffff !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn--primary:hover:not(:disabled),
+    html[data-theme="dark"] button.btn.primary:hover:not(:disabled),
+    html[data-theme="dark"] .actions button.primary:hover:not(:disabled) {
+      background-color: #4b82ef !important;
+      border-color: #4b82ef !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn--retry,
+    html[data-theme="dark"] .jobs-v2-op--retry {
+      background-color: #0b1d3a !important; border-color: #244e91 !important; color: #8db4ff !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn--good,
+    html[data-theme="dark"] .actions button.good,
+    html[data-theme="dark"] .jobs-v2-op--otp {
+      background-color: #082417 !important; border-color: #1f6b45 !important; color: #72e3a2 !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn--danger,
+    html[data-theme="dark"] .actions button.danger,
+    html[data-theme="dark"] .jobs-v2-op--del {
+      background-color: #2b0d0d !important; border-color: #7c2929 !important; color: #ff8e88 !important;
+    }
+    html[data-theme="dark"] .jobs-v2-op--view {
+      background-color: #151515 !important; color: #a1a1aa !important;
+    }
+    html[data-theme="dark"] .jobs-v2-op--stop {
+      background-color: #2a1b07 !important; color: #f2bb68 !important;
+    }
+    html[data-theme="dark"] .jobs-v2-op--retry:hover,
+    html[data-theme="dark"] .jobs-v2-op--otp:hover,
+    html[data-theme="dark"] .jobs-v2-op--del:hover,
+    html[data-theme="dark"] .jobs-v2-op--stop:hover,
+    html[data-theme="dark"] .jobs-v2-op--view:hover {
+      color: #ffffff !important;
+    }
+    html[data-theme="dark"] .jobs-tb-btn:disabled,
+    html[data-theme="dark"] button.btn:disabled,
+    html[data-theme="dark"] .actions button:disabled,
+    html[data-theme="dark"] .jobs-v2-pager button:disabled {
+      background-color: #050505 !important;
+      border-color: #1d1d1d !important;
+      color: #555555 !important;
+    }
+    html[data-theme="dark"] h1,
+    html[data-theme="dark"] h2,
+    html[data-theme="dark"] h3,
+    html[data-theme="dark"] h4,
+    html[data-theme="dark"] label.fld,
+    html[data-theme="dark"] .register-title,
+    html[data-theme="dark"] .stat strong,
+    html[data-theme="dark"] .main-cell,
+    html[data-theme="dark"] .config-card-v2-value,
+    html[data-theme="dark"] .config-section-v2 h3,
+    html[data-theme="dark"] .config-overview-v2-title,
+    html[data-theme="dark"] .outlook-import-head h3,
+    html[data-theme="dark"] .acc-v2-email,
+    html[data-theme="dark"] .config-switch-v2-label {
+      color: #f5f5f5 !important;
+    }
+    html[data-theme="dark"] .head p,
+    html[data-theme="dark"] label.fld .hint,
+    html[data-theme="dark"] .sub-cell,
+    html[data-theme="dark"] .muted,
+    html[data-theme="dark"] .acc-v2-sub,
+    html[data-theme="dark"] .acc-v2-selected,
+    html[data-theme="dark"] .config-card-v2-label,
+    html[data-theme="dark"] .config-card-v2-hint,
+    html[data-theme="dark"] .config-section-v2 > p,
+    html[data-theme="dark"] .config-section-v2-meta,
+    html[data-theme="dark"] .config-section-v2-subhelp,
+    html[data-theme="dark"] .config-switch-v2-help,
+    html[data-theme="dark"] .config-overview-v2-desc,
+    html[data-theme="dark"] .outlook-import-head p,
+    html[data-theme="dark"] .outlook-import-hint,
+    html[data-theme="dark"] .pager-info,
+    html[data-theme="dark"] .pager-total,
+    html[data-theme="dark"] .pager-goto,
+    html[data-theme="dark"] .jobs-tb-field {
+      color: var(--muted) !important;
+    }
+    html[data-theme="dark"] .codex-stat-meta span,
+    html[data-theme="dark"] .codex-stat-meta strong,
+    html[data-theme="dark"] .outlook-import-field > span {
+      color: #f5f5f5 !important;
+    }
+    html[data-theme="dark"] .codex-stat-meta span { color: var(--muted) !important; }
+    html[data-theme="dark"] a { color: #8db4ff; }
+    html[data-theme="dark"] .status-available,
+    html[data-theme="dark"] .status-pending,
+    html[data-theme="dark"] .jobs-v2-pill--pending {
+      color: #8db4ff !important; background: #07152b !important; border-color: #19365f !important;
+    }
+    html[data-theme="dark"] .status-success,
+    html[data-theme="dark"] .jobs-v2-pill--success,
+    html[data-theme="dark"] .accounts-table-v2 .pill.status-success {
+      color: #72e3a2 !important; background: #062519 !important; border-color: #1f6b45 !important;
+    }
+    html[data-theme="dark"] .status-failed,
+    html[data-theme="dark"] .jobs-v2-pill--failed,
+    html[data-theme="dark"] .accounts-table-v2 .pill.status-failed {
+      color: #ff8e88 !important; background: #2b0d0d !important; border-color: #7c2929 !important;
+    }
+    html[data-theme="dark"] .status-running,
+    html[data-theme="dark"] .status-stopping,
+    html[data-theme="dark"] .status-partial_success,
+    html[data-theme="dark"] .jobs-v2-pill--running,
+    html[data-theme="dark"] .accounts-table-v2 .pill.status-running {
+      color: #f2bb68 !important; background: #2a1b07 !important; border-color: #795016 !important;
+    }
+    html[data-theme="dark"] .status-used,
+    html[data-theme="dark"] .status-cancelled,
+    html[data-theme="dark"] .status-stopped,
+    html[data-theme="dark"] .status-disabled,
+    html[data-theme="dark"] .jobs-v2-pill--muted,
+    html[data-theme="dark"] .accounts-table-v2 .pill.status-used,
+    html[data-theme="dark"] .acc-v2-muted {
+      color: #8a8a8a !important; background: #101010 !important; border-color: #292929 !important;
+    }
+    html[data-theme="dark"] .status-exhausted {
+      color: #f2bb68 !important; background: #2a1b07 !important; border-color: #795016 !important;
+    }
+    html[data-theme="dark"] .banner.info { background: #07152b !important; color: #8db4ff !important; border-color: #19365f !important; }
+    html[data-theme="dark"] .banner.warn { background: #2a1b07 !important; color: #f2bb68 !important; border-color: #795016 !important; }
+    html[data-theme="dark"] .log { background: #000 !important; color: #d4d4d4 !important; border: 1px solid #202020; }
+    html[data-theme="dark"] #toast { background: #f5f5f5 !important; color: #000 !important; box-shadow: 0 10px 30px rgba(0,0,0,.7); }
+    html[data-theme="dark"] #logPanel:not(.hidden),
+    html[data-theme="dark"] #retryLogPanel:not(.hidden),
+    html[data-theme="dark"] #liveLogPanel:not(.hidden),
+    html[data-theme="dark"] #qrPanel:not(.hidden) {
+      background: #000 !important; border-color: #303030 !important;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.78), 0 18px 60px rgba(0,0,0,.9) !important;
+    }
+    html[data-theme="dark"] .acc-v2-more-menu,
+    html[data-theme="dark"] .pager-size-menu,
+    html[data-theme="dark"] .config-ep-select-menu,
+    html[data-theme="dark"] .outlook-v2-select-menu {
+      background: #000 !important; border-color: #303030 !important;
+      box-shadow: 0 8px 26px rgba(0,0,0,.9) !important;
+    }
+    html[data-theme="dark"] .acc-v2-more-menu button,
+    html[data-theme="dark"] .pager-size-item,
+    html[data-theme="dark"] .config-ep-select-item,
+    html[data-theme="dark"] .outlook-v2-select-item {
+      background: transparent !important; color: #d6d6d6 !important; border-color: transparent !important;
+    }
+    html[data-theme="dark"] .acc-v2-more-menu button:hover,
+    html[data-theme="dark"] .pager-size-item:hover,
+    html[data-theme="dark"] .config-ep-select-item:hover,
+    html[data-theme="dark"] .outlook-v2-select-item:hover {
+      background: #151515 !important; color: #ffffff !important;
+    }
+    html[data-theme="dark"] .config-nav-v2-item.is-active,
+    html[data-theme="dark"] .config-subtabs-v2 button.active,
+    html[data-theme="dark"] .config-ep-select-item.is-active,
+    html[data-theme="dark"] .pager-size-item.is-active {
+      background: #0d1d38 !important; color: #8db4ff !important;
+    }
+    html[data-theme="dark"] .outlook-import-check { background: #070707 !important; color: #d6d6d6 !important; border-color: #242424 !important; }
+    html[data-theme="dark"] .roxy-invite-link {
+      background: #07152b !important; color: #8db4ff !important; border-color: #244e91 !important;
+    }
+    html[data-theme="dark"] .roxy-invite-link:hover { background: #10264a !important; }
+    html[data-theme="dark"] .agent-token-cell button,
+    html[data-theme="dark"] .accounts-table-v2 .acc-v2-token-copy,
+    html[data-theme="dark"] .codex-table-v2 .acc-v2-token-copy,
+    html[data-theme="dark"] .outlook-table-v2 .acc-v2-token-copy,
+    html[data-theme="dark"] .accounts-table-v2 .extract-link-cell button,
+    html[data-theme="dark"] .accounts-table-v2 .agent-token-cell button,
+    html[data-theme="dark"] .extract-copy {
+      background: #082417 !important; color: #72e3a2 !important; border-color: #1f6b45 !important;
+    }
+    html[data-theme="dark"] .outlook-table-v2 .acc-v2-token-none {
+      background: #2b0d0d !important; color: #ff8e88 !important; border-color: #7c2929 !important;
+    }
+    html[data-theme="dark"] .extract-qr,
+    html[data-theme="dark"] .accounts-table-v2 .agent-token-cell .agent-download {
+      background: #07152b !important; color: #8db4ff !important; border-color: #244e91 !important;
+    }
+    html[data-theme="dark"] .config-switch-v2-icon--default { background: #151515 !important; }
+    html[data-theme="dark"] .config-ep-select-btn:hover,
+    html[data-theme="dark"] .config-ep-select-btn:focus,
+    html[data-theme="dark"] .config-ep-select.open .config-ep-select-btn,
+    html[data-theme="dark"] .jobs-v2-pager .pager-size-btn:hover,
+    html[data-theme="dark"] .jobs-v2-pager .pager-size-btn:focus,
+    html[data-theme="dark"] .jobs-v2-pager .pager-size-btn:active,
+    html[data-theme="dark"] .jobs-v2-pager .pager-size.open .pager-size-btn {
+      background: #000 !important; color: #e5e5e5 !important; border-color: #303030 !important;
+    }
+    html[data-theme="dark"] .outlook-import-close { color: #a1a1aa !important; }
+    html[data-theme="dark"] .outlook-import-close:hover { background: #151515 !important; color: #ffffff !important; }
+    html[data-theme="dark"] .theme-toggle { color: #a1a1aa; }
+    html[data-theme="dark"] .theme-toggle:hover { color: #8db4ff; background: #101b2d; }
+    html[data-theme="dark"] .sidebar-brand-title { color: #f5f5f5 !important; }
+    html[data-theme="dark"] .app-sidebar .sidebar-nav button { color: #a1a1aa; }
+    html[data-theme="dark"] .app-sidebar .sidebar-nav button:hover { color: #f5f5f5; background: #101010; }
+    html[data-theme="dark"] .app-sidebar .sidebar-nav button.active { color: #8db4ff; background: #101b2d; }
+    html[data-theme="dark"] .sidebar-footer { border-top-color: #202020; }
+    html[data-theme="dark"] .sidebar-brand { border-bottom-color: #202020; }
+    html[data-theme="dark"] .jobs-table-v2 input[type="checkbox"],
+    html[data-theme="dark"] .accounts-table-v2 input[type="checkbox"],
+    html[data-theme="dark"] .codex-table-v2 input[type="checkbox"],
+    html[data-theme="dark"] .outlook-table-v2 input[type="checkbox"],
+    html[data-theme="dark"] .outlook-import-check input[type="checkbox"] {
+      background-color: #000 !important; border-color: #3a3a3a !important; accent-color: #4b82ef;
+    }
+    html[data-theme="dark"] .jobs-table-v2 input[type="checkbox"]:checked,
+    html[data-theme="dark"] .accounts-table-v2 input[type="checkbox"]:checked,
+    html[data-theme="dark"] .codex-table-v2 input[type="checkbox"]:checked,
+    html[data-theme="dark"] .outlook-table-v2 input[type="checkbox"]:checked {
+      background-color: #356fe0 !important; border-color: #356fe0 !important;
+    }
+    html[data-theme="dark"] .jobs-table-v2 input[type="checkbox"]:checked::after,
+    html[data-theme="dark"] .accounts-table-v2 input[type="checkbox"]:checked::after,
+    html[data-theme="dark"] .codex-table-v2 input[type="checkbox"]:checked::after,
+    html[data-theme="dark"] .outlook-table-v2 input[type="checkbox"]:checked::after {
+      border-color: #ffffff !important;
+    }
+    html[data-theme="dark"] .config-switch-v2-toggle::before { background: #343434 !important; }
+    html[data-theme="dark"] .config-switch-v2-toggle:checked::before { background: #356fe0 !important; }
+    html[data-theme="dark"] .config-switch-v2-toggle::after { background: #eeeeee !important; }
+    html[data-theme="dark"] .config-section-v2-placeholder,
+    html[data-theme="dark"] .config-card-v2-value.is-placeholder { color: #686868 !important; }
+    html[data-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+    html[data-theme="dark"] ::-webkit-scrollbar-track { background: #000; }
+    html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #292929; border: 2px solid #000; border-radius: 8px; }
+    html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
   </style>
 </head>
 <body>
@@ -1878,6 +2303,15 @@
       </svg>
       <span>切换老 UI</span>
     </a>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-pressed="false" title="切换到深色模式">
+      <svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+      </svg>
+      <svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <span id="themeToggleLabel">深色模式</span>
+    </button>
     <form class="sidebar-logout" method="post" action="/logout">
       <button type="submit">
         <svg class="sidebar-footer-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1949,6 +2383,24 @@
         <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnDeleteSelectedJobsV2" disabled title="删除选中的非运行中任务，并同时删除对应日志">删除选中</button>
         <button type="button" class="jobs-tb-btn" id="btnCancelPendingV2" title="把所有排队任务标记为已取消">取消全部排队</button>
         <button type="button" class="jobs-tb-btn" id="btnRefreshJobsV2" title="手动刷新任务列表">刷新</button>
+        <label class="jobs-tb-field">邮箱来源
+          <div class="outlook-v2-select" id="regSourceV2Wrap">
+            <button type="button" class="outlook-v2-select-btn" id="regSourceV2Btn" aria-haspopup="listbox" aria-expanded="false">跟随配置</button>
+            <div class="outlook-v2-select-menu" role="listbox">
+              <button type="button" class="outlook-v2-select-item is-active" data-value="" role="option">跟随配置</button>
+              <button type="button" class="outlook-v2-select-item" data-value="outlook" role="option">Outlook 邮箱池</button>
+              <button type="button" class="outlook-v2-select-item" data-value="generic_api" role="option">通用 API 取码邮箱</button>
+              <button type="button" class="outlook-v2-select-item" data-value="cloudflare_domain" role="option">域名邮箱池</button>
+              <button type="button" class="outlook-v2-select-item" data-value="lonely" role="option">孤独哥 CDK</button>
+              <button type="button" class="outlook-v2-select-item" data-value="lonely_web" role="option">孤独哥 CDK 网页版</button>
+              <button type="button" class="outlook-v2-select-item" data-value="gptmail" role="option">GPTMail（临时邮箱）</button>
+              <button type="button" class="outlook-v2-select-item" data-value="mailnest" role="option">MailNest（临时邮箱）</button>
+              <button type="button" class="outlook-v2-select-item" data-value="cloudmail" role="option">CloudMail（临时邮箱）</button>
+              <button type="button" class="outlook-v2-select-item" data-value="cloudflare" role="option">Cloudflare（临时邮箱）</button>
+            </div>
+            <input type="hidden" id="regSourceV2" value="">
+          </div>
+        </label>
         <label class="jobs-tb-field">注册数量
           <span class="el-input-number">
             <input id="regCountV2" type="number" min="1" max="200" value="1" inputmode="numeric">
@@ -2184,6 +2636,8 @@
             <button type="button" class="outlook-v2-select-item" data-value="outlook" role="option">Outlook 邮箱池</button>
             <button type="button" class="outlook-v2-select-item" data-value="generic_api" role="option">通用 API 邮箱池</button>
             <button type="button" class="outlook-v2-select-item" data-value="cloudflare_domain" role="option">域名邮箱池</button>
+            <button type="button" class="outlook-v2-select-item" data-value="lonely" role="option">孤独哥（CDK 兑换）</button>
+            <button type="button" class="outlook-v2-select-item" data-value="lonely_web" role="option">孤独哥网页版</button>
           </div>
           <input type="hidden" id="poolSourceV2" value="all">
         </div>
@@ -2196,6 +2650,16 @@
         <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnDeleteSelectedOutlookV2" disabled title="批量删除选中的邮箱素材">删除选中</button>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="copyAllEmailsV2" title="复制当前页全部邮箱素材">复制全部邮箱素材</button>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnImportOutlookV2" title="导入邮箱素材">导入</button>
+      </div>
+      <!-- 孤独哥 CDK 面板：只在选中该来源时显示。下方表格是「已兑换出的邮箱」，
+           刚导入卡密时那里是空的，所以卡密和剩余额度要单独在这里回显。 -->
+      <div id="lonelyCardPanel" class="hidden" style="margin:10px 0;padding:10px 12px;border:1px solid var(--border,#2a2f3a);border-radius:8px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+          <strong>孤独哥 CDK</strong>
+          <span id="lonelyCardSummary" style="opacity:.75;"></span>
+          <button type="button" class="jobs-tb-btn" id="btnRefreshLonelyCards" title="重新读取卡密列表">刷新列表</button>
+        </div>
+        <div id="lonelyCardList" style="display:flex;flex-direction:column;gap:6px;"></div>
       </div>
       <div class="outlook-table-v2-wrap">
         <table class="outlook-table-v2">
@@ -2275,7 +2739,7 @@
     <div class="outlook-import-head">
       <div class="outlook-import-head-main">
         <h3 id="outlookImportTitle">导入邮箱素材</h3>
-        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取码地址（---- 或 ==== 均可）。默认按「已注册成功账号」导入，方便在账号页补跑 Codex。</p>
+        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取码地址（---- 或 ==== 均可）；孤独哥：每行一个 CDK 卡密，邮箱在注册时兑换。默认按「已注册成功账号」导入，方便在账号页补跑 Codex。</p>
       </div>
       <button type="button" class="outlook-import-close" id="btnCloseOutlookImport" aria-label="关闭">×</button>
     </div>
@@ -2288,12 +2752,14 @@
           <div class="outlook-v2-select-menu" role="listbox">
             <button type="button" class="outlook-v2-select-item is-active" data-value="outlook" role="option">Outlook 邮箱池</button>
             <button type="button" class="outlook-v2-select-item" data-value="generic_api" role="option">通用 API 取码邮箱</button>
+            <button type="button" class="outlook-v2-select-item" data-value="lonely" role="option">孤独哥 CDK（卡密兑换）</button>
+            <button type="button" class="outlook-v2-select-item" data-value="lonely_web" role="option">孤独哥 CDK 网页版</button>
           </div>
           <input type="hidden" id="importSourceV2" value="outlook">
         </div>
         <span class="outlook-import-hint">注册来源可在配置里填多个，例如：outlook,generic_api</span>
       </label>
-      <label class="outlook-import-check">
+      <label class="outlook-import-check" id="importAsRegisteredWrapV2">
         <input id="importAsRegisteredV2" type="checkbox" checked>
         <span>导入后默认视为「注册成功账号」（邮箱池标记已用，并出现在账号页，可直接批量补跑 Codex）</span>
       </label>
@@ -2321,6 +2787,31 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const THEME_STORAGE_KEY = 'gpt_console_theme';
+function applyTheme(theme, persist = true) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  document.documentElement.style.colorScheme = next;
+  const meta = document.getElementById('themeColorMeta');
+  if (meta) meta.setAttribute('content', next === 'dark' ? '#000000' : '#ffffff');
+  const toggle = document.getElementById('themeToggle');
+  const label = document.getElementById('themeToggleLabel');
+  if (toggle) {
+    const isDark = next === 'dark';
+    toggle.setAttribute('aria-pressed', String(isDark));
+    toggle.setAttribute('title', isDark ? '切换到浅色模式' : '切换到深色模式');
+    if (label) label.textContent = isDark ? '浅色模式' : '深色模式';
+  }
+  if (persist) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
+  }
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+}
+applyTheme(document.documentElement.dataset.theme || 'light', false);
+const themeToggle = document.getElementById('themeToggle');
+if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
 let copySeq = 0;
 const copyStore = new Map();
 let ACCOUNTS = [], OUTLOOK = [], CONFIG = [];
@@ -2473,7 +2964,7 @@ function short(v, n=40) { const s = v || ''; return s.length > n ? s.slice(0,n)+
 function copyId(v) { if (!v) return ''; const id = 'c'+(++copySeq); copyStore.set(id, v); return id; }
 function cbtn(label, value, cls='') { const id = copyId(value); return `<button class="${cls}" data-copy-id="${id}" ${id?'':'disabled'}>${label}</button>`; }
 function pill(status) {
-  const map = { available:'可用', used:'已用', failed:'失败', partial_success:'部分成功', disabled:'已停用', pending:'排队', running:'运行中', stopping:'停止中', stopped:'已停止', success:'成功', cancelled:'已取消' };
+  const map = { available:'可用', used:'已用', failed:'失败', partial_success:'部分成功', disabled:'已停用', pending:'排队', running:'运行中', stopping:'停止中', stopped:'已停止', success:'成功', cancelled:'已取消', exhausted:'额度用尽' };
   return `<span class="pill status-${esc(status)}">${esc(map[status]||status||'-')}</span>`;
 }
 function pillV2(status) {
@@ -2541,14 +3032,76 @@ function activateTab(tab, persist=true) {
 $$('nav button').forEach(b => b.addEventListener('click', () => activateTab(b.dataset.tab)));
 
 // ---------- 概览 ----------
+const REG_SOURCE_LABELS = {
+  '': '跟随配置',
+  outlook: 'Outlook 邮箱池',
+  generic_api: '通用 API 取码邮箱',
+  cloudflare_domain: '域名邮箱池',
+  lonely: '孤独哥 CDK',
+  lonely_web: '孤独哥 CDK 网页版',
+  gptmail: 'GPTMail（临时邮箱）',
+  mailnest: 'MailNest（临时邮箱）',
+  cloudmail: 'CloudMail（临时邮箱）',
+  cloudflare: 'Cloudflare（临时邮箱）',
+};
+function getRegSource() {
+  const el = document.getElementById('regSourceV2');
+  return el ? String(el.value || '').trim() : '';
+}
+function setRegSourceV2(val) {
+  const hidden = document.getElementById('regSourceV2');
+  const btn = document.getElementById('regSourceV2Btn');
+  const wrap = document.getElementById('regSourceV2Wrap');
+  if (!hidden) return;
+  const next = (val in REG_SOURCE_LABELS) ? val : '';
+  hidden.value = next;
+  if (btn) btn.textContent = REG_SOURCE_LABELS[next];
+  if (wrap) {
+    wrap.querySelectorAll('.outlook-v2-select-item').forEach(item => {
+      item.classList.toggle('is-active', (item.dataset.value || '') === next);
+    });
+  }
+  try { localStorage.setItem('regSourceV2', next); } catch(e) {}
+  // 立刻按新来源刷新「可用」等数字，不用等下一轮轮询
+  if (LAST_SUMMARY) applySummary(LAST_SUMMARY);
+}
+let LAST_SUMMARY = null;
+function applySummary(s) {
+  LAST_SUMMARY = s;
+  $('#statAccounts').textContent = s.accounts;
+
+  // 「可用/总数」跟着注册页下拉走：选了具体来源就显示那个池的数字，
+  // 「跟随配置」则显示配置里那些来源的合计。否则容易出现
+  // 「导入了孤独哥 CDK 但可用显示 0」这种看着像没导进去的情况。
+  const src = getRegSource();
+  const per = s.per_source || {};
+  let stat;
+  if (src && per[src]) {
+    stat = per[src];
+  } else {
+    stat = {
+      total: s.outlook_total, available: s.outlook_available,
+      used: s.outlook_used, failed: s.outlook_failed,
+      unlimited: (s.configured_sources || []).some(x => (per[x] || {}).unlimited),
+    };
+  }
+  // 临时邮箱按需生成，没有池容量，显示 ∞ 比 0 更贴合实际
+  const avail = stat.unlimited && !Number(stat.total || 0) ? '∞' : Number(stat.available || 0);
+  $('#statOutlook').textContent = stat.unlimited && !Number(stat.total || 0) ? '∞' : Number(stat.total || 0);
+  $('#statAvailable').textContent = avail;
+  $('#statUsed').textContent = Number(stat.used || 0);
+  $('#statFailed').textContent = Number(stat.failed || 0);
+
+  const btn = document.getElementById('regSourceV2Btn');
+  if (btn && !src) {
+    // 跟随配置时把实际生效的来源显示出来，避免不知道当前跑的是哪个池
+    const names = (s.configured_sources || []).map(x => REG_SOURCE_LABELS[x] || x);
+    btn.textContent = names.length ? `跟随配置（${names.join('、')}）` : '跟随配置';
+  }
+}
 async function loadSummary() {
   try {
-    const s = await api('/api/summary');
-    $('#statAccounts').textContent = s.accounts;
-    $('#statOutlook').textContent = s.outlook_total;
-    $('#statAvailable').textContent = s.outlook_available;
-    $('#statUsed').textContent = s.outlook_used;
-    $('#statFailed').textContent = s.outlook_failed;
+    applySummary(await api('/api/summary'));
   } catch(e) {}
 }
 
@@ -2572,8 +3125,13 @@ async function startRegistrationFromInputs(countEl, workersEl, startBtn) {
   };
   const b2 = $('#btnStartV2'); if (b2) b2.disabled = true;
   try {
-    const r = await api('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({count, workers}) });
-    const warnHtml = r.warning ? `<div class="banner warn">${esc(r.warning)}（本次并发 ${r.workers || workers}）</div>` : `<div class="banner info">已提交 ${r.submitted} 个任务，本次并发 ${r.workers || workers}</div>`;
+    // source 为空串表示跟随配置，后端按 EMAIL_SOURCE 处理
+    const source = getRegSource();
+    const payload = {count, workers};
+    if (source) payload.source = source;
+    const r = await api('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const srcNote = r.source ? `，来源 ${esc(REG_SOURCE_LABELS[r.source] || r.source)}` : '';
+    const warnHtml = r.warning ? `<div class="banner warn">${esc(r.warning)}（本次并发 ${r.workers || workers}${srcNote}）</div>` : `<div class="banner info">已提交 ${r.submitted} 个任务，本次并发 ${r.workers || workers}${srcNote}</div>`;
     const warnEl = $('#regWarnV2'); if (warnEl) warnEl.innerHTML = warnHtml;
     const c2 = $('#regCountV2'); if (c2) c2.value = count;
     const w2 = $('#regWorkersV2'); if (w2) w2.value = workers;
@@ -2637,6 +3195,14 @@ function bindJobsBodyEvents(bodyEl) {
     }
     const delBtn = e.target.closest('[data-delete-job]');
     if (delBtn) deleteJob(parseInt(delBtn.dataset.deleteJob, 10), delBtn);
+  });
+  bodyEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const otpInput = e.target.closest('.manual-otp-input');
+    if (!otpInput) return;
+    e.preventDefault();
+    const btn = bodyEl.querySelector(`[data-submit-otp-job="${otpInput.dataset.otpJob}"]`);
+    if (btn) submitManualOtpForJob(btn);
   });
   bodyEl.addEventListener('change', (e) => {
     const cb = e.target.closest('.job-row-check');
@@ -4305,6 +4871,8 @@ const POOL_SOURCE_LABELS = {
   outlook: 'Outlook 邮箱池',
   generic_api: '通用 API 邮箱池',
   cloudflare_domain: '域名邮箱池',
+  lonely: '孤独哥（CDK 兑换）',
+  lonely_web: '孤独哥网页版',
 };
 function setPoolSourceV2(val) {
   const hidden = document.getElementById('poolSourceV2');
@@ -4326,7 +4894,7 @@ function getOutlookQuery() {
 }
 function poolKey(r) { return `${r.source || getPoolSource() || 'outlook'}|${r.email || ''}`; }
 function poolLabel(src) {
-  return ({outlook:'Outlook', generic_api:'通用API', cloudflare_domain:'域名邮箱'})[src] || src || '-';
+  return ({outlook:'Outlook', generic_api:'通用API', cloudflare_domain:'域名邮箱', lonely:'孤独哥', lonely_web:'孤独哥网页版'})[src] || src || '-';
 }
 async function loadOutlook() {
   try {
@@ -4339,7 +4907,110 @@ async function loadOutlook() {
     const totalPages = Math.max(1, Math.ceil(OUTLOOK_TOTAL / p.size));
     if (p.page > totalPages) { p.page = totalPages; return loadOutlook(); }
     renderOutlook();
+    loadLonelyCards();
   } catch(e) {}
+}
+// 两种孤独哥共用一个 CDK 面板。额度卡版一卡多邮箱、要激活；
+// 网页版一卡一邮箱、不用激活，只能查状态。
+const LONELY_KINDS = {
+  lonely:     { api: '/api/lonely/cards',     label: '孤独哥 CDK' },
+  lonely_web: { api: '/api/lonely-web/cards', label: '孤独哥 CDK 网页版' },
+};
+let LONELY_PANEL_KIND = 'lonely';
+async function loadLonelyCards() {
+  const panel = document.getElementById('lonelyCardPanel');
+  if (!panel) return;
+  const src = getPoolSource();
+  const kind = (src === 'lonely' || src === 'lonely_web') ? src : (src === 'all' ? 'all' : null);
+  if (!kind) { panel.classList.add('hidden'); return; }
+  try {
+    if (kind === 'all') {
+      // 全部邮箱池：哪种有卡就显示哪种，都没有就不占地方
+      for (const k of ['lonely', 'lonely_web']) {
+        const res = await api(LONELY_KINDS[k].api);
+        const cards = res.cards || [];
+        if (cards.length) {
+          LONELY_PANEL_KIND = k;
+          panel.classList.remove('hidden');
+          renderLonelyCards(cards, res.summary || {}, k);
+          return;
+        }
+      }
+      panel.classList.add('hidden');
+      return;
+    }
+    LONELY_PANEL_KIND = kind;
+    const res = await api(LONELY_KINDS[kind].api);
+    panel.classList.remove('hidden');
+    renderLonelyCards(res.cards || [], res.summary || {}, kind);
+  } catch(e) { panel.classList.add('hidden'); }
+}
+function renderLonelyCards(cards, summary, kind) {
+  const isWeb = kind === 'lonely_web';
+  const sumEl = document.getElementById('lonelyCardSummary');
+  if (sumEl) {
+    if (!cards.length) {
+      sumEl.textContent = `还没有导入卡密，点右上「导入」选择「${LONELY_KINDS[kind].label}」`;
+    } else if (isWeb) {
+      sumEl.textContent = `${LONELY_KINDS[kind].label}：共 ${summary.total || cards.length} 张，未兑换 ${summary.available || 0} 张（= 还能注册多少个号），已兑换 ${summary.used || 0} 张`;
+    } else {
+      sumEl.textContent = `${LONELY_KINDS[kind].label}：共 ${summary.total || cards.length} 张，可用 ${summary.available || 0} 张，剩余额度 ${summary.remaining_quota || 0} 次（= 还能兑换多少个邮箱）`;
+    }
+  }
+  const listEl = document.getElementById('lonelyCardList');
+  if (!listEl) return;
+  listEl.innerHTML = cards.map(c => {
+    const code = esc(c.card_code || '');
+    let midCol, actionBtn;
+    if (isWeb) {
+      // 一卡一邮箱：邮箱直接挂在卡上
+      midCol = c.email
+        ? `已兑换：<code>${esc(c.email)}</code>${c.session_id ? ` <span style="opacity:.6;">session ${esc(c.session_id)}</span>` : ''}`
+        : '<span style="opacity:.7;">尚未兑换（注册时自动兑换）</span>';
+      actionBtn = `<button type="button" class="jobs-tb-btn" data-lonely-act="lookup" data-card="${code}" title="查这张卡当前的邮箱和已收到的验证码，不消耗卡">查状态</button>`;
+    } else {
+      const activated = !!c.api_key_preview;
+      const quota = activated
+        ? `额度 ${c.used_quota ?? '-'}/${c.total_quota ?? '-'}，剩余 <b>${c.remaining_quota ?? '-'}</b>`
+        : '<span style="opacity:.7;">未激活（注册时会自动激活）</span>';
+      const emails = (c.emails || []);
+      const emailLine = emails.length
+        ? `已兑换 ${emails.length} 个：${emails.slice(0, 5).map(e => esc(e.email || '')).join('、')}${emails.length > 5 ? ' …' : ''}`
+        : '尚未兑换出邮箱';
+      midCol = `<span>${quota}</span><span style="opacity:.75;flex:1 1 240px;">${emailLine}</span>`;
+      actionBtn = `<button type="button" class="jobs-tb-btn" data-lonely-act="${activated ? 'refresh' : 'activate'}" data-card="${code}">${activated ? '刷新额度' : '立即激活'}</button>`;
+    }
+    return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--border,#2a2f3a);border-radius:6px;">
+      <code>${code}</code>
+      ${pill(c.status)}
+      ${c.product_name ? `<span style="opacity:.75;">${esc(c.product_name)}</span>` : ''}
+      ${c.expires_at ? `<span style="opacity:.6;">到期 ${esc(c.expires_at)}</span>` : ''}
+      <span style="flex:1 1 240px;opacity:.85;">${midCol}</span>
+      ${actionBtn}
+      <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" data-lonely-act="delete" data-card="${code}">删除</button>
+    </div>`;
+  }).join('');
+}
+async function onLonelyCardAction(act, cardCode) {
+  if (!act || !cardCode) return;
+  if (act === 'delete' && !confirm(`确认删除卡密 ${cardCode}？已兑换出的邮箱记录会保留。`)) return;
+  const isWeb = LONELY_PANEL_KIND === 'lonely_web';
+  const base = isWeb ? '/api/lonely-web/cards' : '/api/lonely/cards';
+  const url = act === 'delete' ? `${base}/delete`
+    : act === 'lookup' ? `${base}/lookup`
+    : act === 'refresh' ? `${base}/refresh`
+    : `${base}/activate`;
+  try {
+    const r = await api(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({card_code: cardCode}) });
+    if (act === 'delete') showToast('已删除卡密');
+    else if (act === 'lookup') {
+      const codes = (r.codes || []).map(c => c.code).join('、');
+      showToast(`邮箱 ${r.email || '-'}${codes ? `｜验证码 ${codes}` : '｜暂无验证码'}`);
+    }
+    else showToast(`额度：剩余 ${r.remaining_quota ?? r.remainingQuota ?? '-'} 次`);
+    // loadOutlook 内部会再拉一次卡片列表，不用单独调 loadLonelyCards
+    loadOutlook(); loadSummary();
+  } catch(e) { showToast('操作失败: ' + e.message); }
 }
 function closeOutlookV2MoreMenus() {
   document.querySelectorAll('.outlook-table-v2 .acc-v2-more.open').forEach(el => el.classList.remove('open'));
@@ -4496,6 +5167,44 @@ async function onOutlookBodyClick(e) {
     loadOutlook(); loadSummary();
   } catch(err) { showToast('操作失败: ' + err.message); }
 }
+(function bindRegSourceV2() {
+  const wrap = document.getElementById('regSourceV2Wrap');
+  const btn = document.getElementById('regSourceV2Btn');
+  if (!wrap || !btn) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = !wrap.classList.contains('open');
+    wrap.classList.toggle('open', willOpen);
+    btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+  wrap.querySelectorAll('.outlook-v2-select-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setRegSourceV2(item.dataset.value || '');
+      wrap.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+    });
+  });
+  document.addEventListener('click', () => {
+    wrap.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  });
+  // 记住上次选的来源，刷新页面不用重选
+  let saved = '';
+  try { saved = localStorage.getItem('regSourceV2') || ''; } catch(e) {}
+  setRegSourceV2(saved);
+})();
+(function bindLonelyCardPanel() {
+  const listEl = document.getElementById('lonelyCardList');
+  if (listEl) listEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lonely-act]');
+    if (!btn) return;
+    e.preventDefault();
+    onLonelyCardAction(btn.dataset.lonelyAct, btn.dataset.card);
+  });
+  const refreshBtn = document.getElementById('btnRefreshLonelyCards');
+  if (refreshBtn) refreshBtn.addEventListener('click', () => loadLonelyCards());
+})();
 (function bindOutlookV2() {
   const qV2 = $('#qOutlookV2');
   if (qV2) qV2.addEventListener('input', debounce(() => {
@@ -4553,7 +5262,16 @@ async function onOutlookBodyClick(e) {
 const IMPORT_SOURCE_LABELS = {
   outlook: 'Outlook 邮箱池',
   generic_api: '通用 API 取码邮箱',
+  lonely: '孤独哥 CDK（卡密兑换）',
+  lonely_web: '孤独哥 CDK 网页版',
 };
+const IMPORT_PLACEHOLDERS = {
+  outlook: 'email----password----clientId----refreshToken',
+  generic_api: 'email----取码地址',
+  lonely: 'MAIL-XXXX-XXXX-XXXX\nMAIL-YYYY-YYYY-YYYY',
+  lonely_web: 'MAIL-XXXX-XXXX-XXXX\nMAIL-YYYY-YYYY-YYYY',
+};
+const CDK_IMPORT_SOURCES = ['lonely', 'lonely_web'];
 function setImportSourceV2(val) {
   const hidden = document.getElementById('importSourceV2');
   const btn = document.getElementById('importSourceV2Btn');
@@ -4567,6 +5285,14 @@ function setImportSourceV2(val) {
       item.classList.toggle('is-active', item.dataset.value === next);
     });
   }
+  const ta = document.getElementById('importTextV2');
+  if (ta) ta.placeholder = IMPORT_PLACEHOLDERS[next] || '';
+  // CDK 导入的是卡密不是邮箱，邮箱要等注册时兑换，「按已注册账号导入」不适用。
+  const regWrap = document.getElementById('importAsRegisteredWrapV2');
+  const regEl = document.getElementById('importAsRegisteredV2');
+  const isCdk = CDK_IMPORT_SOURCES.includes(next);
+  if (regWrap) regWrap.style.display = isCdk ? 'none' : '';
+  if (regEl && isCdk) regEl.checked = false;
 }
 function openOutlookImportModal() {
   const modal = $('#outlookImportModal');
@@ -4574,7 +5300,7 @@ function openOutlookImportModal() {
   const result = $('#importResultV2');
   if (result) result.innerHTML = '';
   const pool = getPoolSource();
-  if (pool === 'outlook' || pool === 'generic_api') setImportSourceV2(pool);
+  if (pool === 'outlook' || pool === 'generic_api' || pool === 'lonely' || pool === 'lonely_web') setImportSourceV2(pool);
   else setImportSourceV2('outlook');
   modal.classList.remove('hidden');
   updateModalScrollLock();
@@ -4635,15 +5361,22 @@ async function doImportOutlook() {
   const registeredEl = $('#importAsRegisteredV2');
   const resultEl = $('#importResultV2');
   const submitBtn = $('#btnSubmitOutlookImport');
+  const source = sourceEl ? sourceEl.value : 'outlook';
+  const isCdk = CDK_IMPORT_SOURCES.includes(source);
   const text = textEl ? textEl.value : '';
-  if (!text.trim()) { showToast('请粘贴邮箱素材'); return; }
+  if (!text.trim()) { showToast(isCdk ? '请粘贴 CDK 卡密' : '请粘贴邮箱素材'); return; }
   if (submitBtn) submitBtn.disabled = true;
   try {
-    const source = sourceEl ? sourceEl.value : 'outlook';
-    const as_registered = registeredEl ? !!registeredEl.checked : true;
+    // CDK 兑换出的邮箱要等注册时才产生，不能按已注册账号导入。
+    const as_registered = isCdk ? false : (registeredEl ? !!registeredEl.checked : true);
     const r = await api('/api/outlook/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, source, as_registered}) });
-    const mode = r.as_registered ? '已注册账号' : '邮箱池素材';
-    const msg = `按 ${mode} 导入：解析 ${r.parsed} 行，新增 ${r.inserted}，跳过 ${r.skipped}${r.as_registered ? '；可到“账号”页选择后批量补跑 Codex' : ''}`;
+    const mode = isCdk ? 'CDK 卡密' : (r.as_registered ? '已注册账号' : '邮箱池素材');
+    const tail = source === 'lonely'
+      ? '；卡密激活后可在邮箱池「孤独哥」查看额度，注册时自动兑换邮箱'
+      : source === 'lonely_web'
+      ? '；一卡一邮箱，注册时自动兑换；可在邮箱池「孤独哥网页版」查看'
+      : (r.as_registered ? '；可到“账号”页选择后批量补跑 Codex' : '');
+    const msg = `按 ${mode} 导入：解析 ${r.parsed} ${isCdk ? '个卡密' : '行'}，新增 ${r.inserted}，跳过 ${r.skipped}${tail}`;
     if (resultEl) resultEl.innerHTML = `<div class="banner info">${esc(msg)}</div>`;
     if (textEl) textEl.value = '';
     setPoolSourceV2(source);

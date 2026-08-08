@@ -30,7 +30,7 @@ def _pool_source_arg(default: str = "outlook") -> str:
     if not src and request.method == "POST":
         data = request.get_json(silent=True) or {}
         src = (data.get("source") or data.get("type") or "").strip()
-    return src if src in ("all", "outlook", "generic_api", "cloudflare_domain") else default
+    return src if src in ("all", "outlook", "generic_api", "cloudflare_domain", "lonely", "lonely_web") else default
 
 
 def _with_pool_source(rows: list[dict], source: str) -> list[dict]:
@@ -250,21 +250,38 @@ def create_app(auth_code: str | None = None) -> Flask:
     def api_summary():
         from config import email as _email_cfg
         from core.email_provider import parse_email_sources
-        pool = {"total": 0, "available": 0, "used": 0, "failed": 0}
-        for src in parse_email_sources(_email_cfg.EMAIL_SOURCE):
-            # GPTMail/MailNest/CloudMail 地址按需生成，不属于本地邮箱池。
-            if src in ("gptmail", "mailnest", "cloudmail", "cloudflare"):
-                continue
-            one = (
-                db.generic_api_email_pool_summary() if src == "generic_api"
-                else db.domain_email_pool_summary() if src == "cloudflare_domain"
-                else db.outlook_pool_summary()
-            )
-            for k in pool:
-                pool[k] += int(one.get(k, 0) or 0)
-        domain_pool = db.domain_email_pool_summary()
+
+        # 每个本地池单独算一份，前端按注册页选的来源取对应数字。
+        # 只统计配置里点名的来源会导致：导入了 CDK 但配置还是 outlook 时，
+        # 「可用」显示 0，看着像没导进去。
+        per_source = {
+            "outlook": db.outlook_pool_summary(),
+            "generic_api": db.generic_api_email_pool_summary(),
+            "cloudflare_domain": db.domain_email_pool_summary(),
+            "lonely": db.lonely_email_pool_summary(),
+            "lonely_web": db.lonely_web_email_pool_summary(),
+        }
+        # 临时邮箱按需生成，没有本地池，容量不设上限
+        for src in ("gptmail", "mailnest", "cloudmail", "cloudflare"):
+            per_source[src] = {"total": 0, "available": 0, "used": 0, "failed": 0, "unlimited": True}
+
+        def _sum_of(sources: list[str]) -> dict:
+            out = {"total": 0, "available": 0, "used": 0, "failed": 0, "unlimited": False}
+            for s in sources:
+                one = per_source.get(s) or {}
+                if one.get("unlimited"):
+                    out["unlimited"] = True
+                    continue
+                for k in ("total", "available", "used", "failed"):
+                    out[k] += int(one.get(k, 0) or 0)
+            return out
+
+        configured = parse_email_sources(_email_cfg.EMAIL_SOURCE)
+        pool = _sum_of(configured)
+        domain_pool = per_source["cloudflare_domain"]
         return jsonify({
             "accounts": db.count_accounts(),
+            # outlook_* 保持原含义（按配置的来源合计），旧前端字段不破
             "outlook_total": pool.get("total", 0),
             "outlook_available": pool.get("available", 0),
             "outlook_used": pool.get("used", 0),
@@ -273,6 +290,9 @@ def create_app(auth_code: str | None = None) -> Flask:
             "domain_available": domain_pool.get("available", 0),
             "domain_used": domain_pool.get("used", 0),
             "domain_failed": domain_pool.get("failed", 0),
+            # 新增：注册页下拉按来源取数用
+            "configured_sources": configured,
+            "per_source": per_source,
         })
 
     # ----------------------------------------------------------
@@ -1292,9 +1312,16 @@ def create_app(auth_code: str | None = None) -> Flask:
             rows += _with_pool_source(db.list_outlook_pool(status=status, limit=fetch_limit), "outlook")
             rows += _with_pool_source(db.list_generic_api_email_pool(status=status, limit=fetch_limit), "generic_api")
             rows += _with_pool_source(db.list_domain_email_pool(status=status, limit=fetch_limit), "cloudflare_domain")
+            rows += _with_pool_source(db.list_lonely_email_pool(status=status, limit=fetch_limit), "lonely")
+            rows += _with_pool_source(db.list_lonely_web_email_pool(status=status, limit=fetch_limit), "lonely_web")
             rows = sorted(rows, key=lambda x: str(x.get("created_at") or x.get("imported_at") or x.get("used_at") or ""), reverse=True)
         elif source == "generic_api":
             rows = _with_pool_source(db.list_generic_api_email_pool(status=status, limit=fetch_limit), "generic_api")
+        elif source == "lonely":
+            # 孤独哥展示的是「已兑换出来的邮箱」，CDK 本身走 /api/lonely/cards
+            rows = _with_pool_source(db.list_lonely_email_pool(status=status, limit=fetch_limit), "lonely")
+        elif source == "lonely_web":
+            rows = _with_pool_source(db.list_lonely_web_email_pool(status=status, limit=fetch_limit), "lonely_web")
         elif source == "cloudflare_domain":
             rows = _with_pool_source(db.list_domain_email_pool(status=status, limit=fetch_limit), "cloudflare_domain")
         else:
@@ -1317,10 +1344,38 @@ def create_app(auth_code: str | None = None) -> Flask:
         """
         data = request.get_json(silent=True) or {}
         source = (data.get("source") or data.get("type") or "").strip()
-        if source not in ("outlook", "generic_api"):
-            return jsonify({"ok": False, "error": "导入时请选择具体类型：Outlook 或 通用 API"}), 400
+        if source not in ("outlook", "generic_api", "lonely", "lonely_web"):
+            return jsonify({"ok": False, "error": "导入时请选择具体类型：Outlook / 通用 API / 孤独哥 CDK / 孤独哥 CDK 网页版"}), 400
         text = data.get("text") or ""
         as_registered = bool(data.get("as_registered", False))
+
+        # 两种孤独哥都走 CDK：每行一个卡密，不是邮箱行，也不能按「已注册账号」导入
+        # （邮箱要等注册时兑换才知道）。
+        if source in ("lonely", "lonely_web"):
+            cards = []
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # 容错：粘贴时可能带了别的分段，只取第一段当卡密
+                code = line.split("----")[0].split("====")[0].strip()
+                if code:
+                    cards.append({"card_code": code})
+            if not cards:
+                return jsonify({"ok": False, "error": "未解析到有效卡密（每行一个 CDK）"}), 400
+            inserted, skipped = (
+                db.import_lonely_web_cards(cards) if source == "lonely_web"
+                else db.import_lonely_cards(cards)
+            )
+            return jsonify({
+                "ok": True,
+                "inserted": inserted,
+                "skipped": skipped,
+                "parsed": len(cards),
+                "as_registered": False,
+                "source": source,
+            })
+
         records = []
         for line in text.splitlines():
             line = line.strip()
@@ -1365,6 +1420,160 @@ def create_app(auth_code: str | None = None) -> Flask:
             "as_registered": as_registered,
         })
 
+    @app.get("/api/lonely/cards")
+    def api_lonely_cards():
+        """孤独哥 CDK 列表：卡密 + 额度 + 已兑换出的邮箱。密钥不下发。"""
+        status = request.args.get("status") or None
+        limit = request.args.get("limit", default=500, type=int)
+        return jsonify({
+            "ok": True,
+            "cards": db.list_lonely_card_pool(status=status, limit=limit),
+            "summary": db.lonely_card_pool_summary(),
+        })
+
+    @app.post("/api/lonely/cards/activate")
+    def api_lonely_card_activate():
+        """
+        手动激活一张卡，立刻回显额度 —— 导入后不用等注册就能确认卡是否有效。
+        body: {card_code}
+        """
+        data = request.get_json(silent=True) or {}
+        card_code = (data.get("card_code") or "").strip()
+        if not card_code:
+            return jsonify({"ok": False, "error": "缺少 card_code"}), 400
+        card = db.get_lonely_card(card_code)
+        if card is None:
+            return jsonify({"ok": False, "error": f"CDK 不存在: {card_code}"}), 404
+
+        from core.lonely_mail_client import activate_card, LonelyMailError
+        try:
+            info = activate_card(card_code, base_url=card.get("base_url") or None)
+        except LonelyMailError as exc:
+            db.release_lonely_card(card_code, status="failed", note=str(exc))
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        db.update_lonely_card_activation(
+            card_code,
+            api_key=str(info.get("apiKey") or ""),
+            api_secret=str(info.get("apiSecret") or ""),
+            product_name=info.get("productName"),
+            total_quota=info.get("totalQuota"),
+            used_quota=info.get("usedQuota"),
+            remaining_quota=info.get("remainingQuota"),
+            expires_at=info.get("expiresAt"),
+        )
+        return jsonify({
+            "ok": True,
+            "product_name": info.get("productName"),
+            "total_quota": info.get("totalQuota"),
+            "used_quota": info.get("usedQuota"),
+            "remaining_quota": info.get("remainingQuota"),
+            "expires_at": info.get("expiresAt"),
+        })
+
+    @app.post("/api/lonely/cards/refresh")
+    def api_lonely_card_refresh():
+        """刷新一张已激活卡的额度（查询不扣次数）。body: {card_code}"""
+        data = request.get_json(silent=True) or {}
+        card_code = (data.get("card_code") or "").strip()
+        card = db.get_lonely_card(card_code)
+        if card is None:
+            return jsonify({"ok": False, "error": f"CDK 不存在: {card_code}"}), 404
+        if not card.get("api_key") or not card.get("api_secret"):
+            return jsonify({"ok": False, "error": "该 CDK 尚未激活，请先激活"}), 400
+
+        from core.lonely_mail_client import query_quota, LonelyMailError
+        try:
+            info = query_quota(card["api_key"], card["api_secret"], base_url=card.get("base_url") or None)
+        except LonelyMailError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        db.update_lonely_card_activation(
+            card_code,
+            product_name=info.get("productName"),
+            total_quota=info.get("totalQuota"),
+            used_quota=info.get("usedQuota"),
+            remaining_quota=info.get("remainingQuota"),
+            expires_at=info.get("expiresAt"),
+        )
+        # cardStatus 不是 active 时禁用，避免继续白扣重试
+        if str(info.get("cardStatus") or "").lower() not in ("", "active"):
+            db.release_lonely_card(card_code, status="disabled", note=f"cardStatus={info.get('cardStatus')}")
+        return jsonify({"ok": True, **{k: info.get(k) for k in (
+            "productName", "totalQuota", "usedQuota", "remainingQuota", "cardStatus", "expiresAt")}})
+
+    @app.get("/api/lonely-web/cards")
+    def api_lonely_web_cards():
+        """孤独哥网页版 CDK 列表：卡密 + 兑换出的邮箱（一对一）。"""
+        status = request.args.get("status") or None
+        limit = request.args.get("limit", default=500, type=int)
+        return jsonify({
+            "ok": True,
+            "cards": db.list_lonely_web_card_pool(status=status, limit=limit),
+            "summary": db.lonely_web_card_pool_summary(),
+        })
+
+    @app.post("/api/lonely-web/cards/lookup")
+    def api_lonely_web_card_lookup():
+        """
+        手动查一张卡的当前状态（邮箱地址 + 已收到的验证码），不消耗卡。
+        未兑换的卡会返回 2005，提示先兑换或直接跑注册。
+        body: {card_code}
+        """
+        data = request.get_json(silent=True) or {}
+        card_code = (data.get("card_code") or "").strip()
+        if not card_code:
+            return jsonify({"ok": False, "error": "缺少 card_code"}), 400
+        card = db.get_lonely_web_card(card_code)
+        if card is None:
+            return jsonify({"ok": False, "error": f"CDK 不存在: {card_code}"}), 404
+
+        from core.lonely_web_client import lookup_order, LonelyWebError, CODE_NOT_REDEEMED
+        try:
+            # poll=false：只读当前状态，不挂起等新码
+            info = lookup_order(card_code, poll=False, base_url=card.get("base_url") or None, timeout=30)
+        except LonelyWebError as exc:
+            if exc.code == CODE_NOT_REDEEMED:
+                return jsonify({"ok": False, "error": "卡密尚未兑换，跑注册任务时会自动兑换"}), 400
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        # 已兑换但本地没记录（比如在网页上手动兑换过），补一条，前端就能看到
+        if info["email"] and not db.get_lonely_web_redeemed_email(info["email"]):
+            db.record_lonely_web_redeemed_email(
+                card_code=card_code,
+                email=info["email"],
+                session_id=info["session_id"],
+                product_name=info.get("product_name"),
+                session_expires_at=info.get("expires_at"),
+            )
+        return jsonify({
+            "ok": True,
+            "email": info["email"],
+            "session_id": info["session_id"],
+            "status": info.get("status"),
+            "product_name": info.get("product_name"),
+            "expires_at": info.get("expires_at"),
+            "codes": info["codes"][:5],
+        })
+
+    @app.post("/api/lonely-web/cards/delete")
+    def api_lonely_web_card_delete():
+        """删除网页版 CDK。已兑换出的邮箱记录保留。body: {card_code}"""
+        data = request.get_json(silent=True) or {}
+        card_code = (data.get("card_code") or "").strip()
+        if not card_code:
+            return jsonify({"ok": False, "error": "缺少 card_code"}), 400
+        return jsonify({"ok": db.delete_lonely_web_card(card_code)})
+
+    @app.post("/api/lonely/cards/delete")
+    def api_lonely_card_delete():
+        """删除 CDK。已兑换出的邮箱记录保留。body: {card_code}"""
+        data = request.get_json(silent=True) or {}
+        card_code = (data.get("card_code") or "").strip()
+        if not card_code:
+            return jsonify({"ok": False, "error": "缺少 card_code"}), 400
+        return jsonify({"ok": db.delete_lonely_card(card_code)})
+
     @app.post("/api/outlook/status")
     def api_outlook_status():
         """手动改邮箱状态：body {email, status, note?, source?}。status ∈ available/used/failed/disabled。"""
@@ -1380,6 +1589,10 @@ def create_app(auth_code: str | None = None) -> Flask:
             db.release_generic_api_email(email, status=status, note=data.get("note"))
         elif source == "cloudflare_domain":
             db.release_domain_email(email, status=status, note=data.get("note"))
+        elif source == "lonely":
+            db.release_lonely_redeemed_email(email, status=status, note=data.get("note"))
+        elif source == "lonely_web":
+            db.release_lonely_web_redeemed_email(email, status=status, note=data.get("note"))
         else:
             db.release_outlook(email, status=status, note=data.get("note"))
         return jsonify({"ok": True})
@@ -1423,6 +1636,10 @@ def create_app(auth_code: str | None = None) -> Flask:
                     db.release_generic_api_email(email, status=status, note=note)
                 elif item_source == "cloudflare_domain":
                     db.release_domain_email(email, status=status, note=note)
+                elif item_source == "lonely":
+                    db.release_lonely_redeemed_email(email, status=status, note=note)
+                elif item_source == "lonely_web":
+                    db.release_lonely_web_redeemed_email(email, status=status, note=note)
                 else:
                     db.release_outlook(email, status=status, note=note)
                 updated.append({"email": email, "source": item_source, "status": status})
@@ -1450,6 +1667,10 @@ def create_app(auth_code: str | None = None) -> Flask:
             if source == "generic_api"
             else db.delete_domain_email(email)
             if source == "cloudflare_domain"
+            else db.delete_lonely_redeemed_email(email)
+            if source == "lonely"
+            else db.delete_lonely_web_redeemed_email(email)
+            if source == "lonely_web"
             else db.delete_outlook(email)
         )
         return jsonify({"ok": True, "deleted": deleted})
@@ -1489,6 +1710,10 @@ def create_app(auth_code: str | None = None) -> Flask:
                 if item_source == "generic_api"
                 else db.delete_domain_email(email)
                 if item_source == "cloudflare_domain"
+                else db.delete_lonely_redeemed_email(email)
+                if item_source == "lonely"
+                else db.delete_lonely_web_redeemed_email(email)
+                if item_source == "lonely_web"
                 else db.delete_outlook(email)
             )
             if deleted_ok:
@@ -2064,7 +2289,11 @@ def create_app(auth_code: str | None = None) -> Flask:
 
     @app.post("/api/jobs")
     def api_jobs_create():
-        """启动批量注册：body {count, workers}。"""
+        """
+        启动批量注册：body {count, workers, source?}。
+
+        source 传了就本次用它（不写回配置），不传则用配置里的 EMAIL_SOURCE。
+        """
         data = request.get_json(silent=True) or {}
         try:
             count = int(data.get("count", 1))
@@ -2103,7 +2332,23 @@ def create_app(auth_code: str | None = None) -> Flask:
                 "warning": f"手动 OTP 模式：将使用 {reg_email}；验证码请在任务页提交",
                 "workers": workers,
             })
-        sources = parse_email_sources(_email_cfg.EMAIL_SOURCE)
+        # 注册页下拉选的来源优先；没选就用配置。后面的必填校验和容量提示都基于它。
+        requested_source = str(data.get("source") or "").strip()
+        if requested_source:
+            # parse_email_sources 解析不出来时会兜底成 ["outlook"]，所以这里先显式校验：
+            # 传错来源必须报错，不能静默跑到别的池子上。
+            from core.email_provider import _VALID_SOURCES
+            bad = [
+                s for s in (x.strip() for x in requested_source.replace(";", ",").replace("|", ",").split(","))
+                if s and s not in _VALID_SOURCES
+            ]
+            if bad:
+                return jsonify({"ok": False, "error": f"未知邮箱来源: {', '.join(bad)}"}), 400
+            sources = parse_email_sources(requested_source)
+        else:
+            sources = parse_email_sources(_email_cfg.EMAIL_SOURCE)
+        # 传给服务层：任务会记住这个来源，重试也沿用
+        email_source = ",".join(sources)
         if "gptmail" in sources:
             api_key = str(getattr(_email_cfg, "GPTMAIL_API_KEY", "") or "").strip()
             if not api_key:
@@ -2166,12 +2411,27 @@ def create_app(auth_code: str | None = None) -> Flask:
             warning = ""
             if pool.get("available", 0) < count:
                 warning = f"通用 API 邮箱池仅 {pool.get('available', 0)} 个可用，少于任务数 {count}，不足的会失败"
+        elif sources == ["lonely"]:
+            # available 即 CDK 剩余额度总和
+            pool = db.lonely_email_pool_summary()
+            warning = ""
+            if pool.get("available", 0) < count:
+                warning = f"孤独哥 CDK 剩余额度仅 {pool.get('available', 0)} 次，少于任务数 {count}，不足的会失败"
+        elif sources == ["lonely_web"]:
+            pool = db.lonely_web_email_pool_summary()
+            warning = ""
+            if pool.get("available", 0) < count:
+                warning = f"孤独哥网页版仅 {pool.get('available', 0)} 张未兑换卡密，少于任务数 {count}，不足的会失败"
         elif len(sources) > 1:
             available = 0
             if "outlook" in sources:
                 available += db.outlook_pool_summary().get("available", 0)
             if "generic_api" in sources:
                 available += db.generic_api_email_pool_summary().get("available", 0)
+            if "lonely" in sources:
+                available += db.lonely_email_pool_summary().get("available", 0)
+            if "lonely_web" in sources:
+                available += db.lonely_web_email_pool_summary().get("available", 0)
             warning = ""
             if available < count:
                 warning = f"多个邮箱池合计仅 {available} 个可用，少于任务数 {count}，不足的会失败"
@@ -2180,8 +2440,15 @@ def create_app(auth_code: str | None = None) -> Flask:
             warning = ""
             if pool.get("available", 0) < count:
                 warning = f"可用邮箱仅 {pool.get('available', 0)} 个，少于任务数 {count}，不足的会失败"
-        jobs = svc.submit_registration(count=count, workers=workers)
-        return jsonify({"ok": True, "submitted": len(jobs), "jobs": jobs, "warning": warning, "workers": workers})
+        jobs = svc.submit_registration(count=count, workers=workers, email_source=email_source)
+        return jsonify({
+            "ok": True,
+            "submitted": len(jobs),
+            "jobs": jobs,
+            "warning": warning,
+            "workers": workers,
+            "source": email_source,
+        })
 
     @app.get("/api/manual-otp/waiting")
     def api_manual_otp_waiting():
