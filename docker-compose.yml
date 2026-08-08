@@ -1,0 +1,62 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: turb-gpt-free-register:local
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      PYTHONUNBUFFERED: "1"
+      # The default driver talks to a Roxy service on the Docker host.
+      # Override with DOCKER_ROXY_API_BASE when Roxy is another container.
+      ROXY_API_BASE: "${DOCKER_ROXY_API_BASE:-http://host.docker.internal:50100}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # The application stores .env, account pools, jobs and logs in the project root.
+      - type: bind
+        source: .
+        target: /app
+      - type: volume
+        source: browser-cache
+        target: /root/.cache
+    expose:
+      - "5000"
+    command: ["python", "web.py", "--host", "0.0.0.0", "--port", "5000"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/login', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  nginx:
+    image: nginx:1.25.3-alpine-slim
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - type: bind
+        source: ./docker/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: "${SSL_DIR:-/root/runner/ssl/makabaka.chat}"
+        target: /etc/nginx/ssl
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  browser-cache:
