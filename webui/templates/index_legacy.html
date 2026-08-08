@@ -3,6 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff" id="themeColorMeta">
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('gpt_console_theme');
+        document.documentElement.dataset.theme = saved === 'dark' ? 'dark' : 'light';
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <title>GPT 注册控制台</title>
   <style>
     * { box-sizing: border-box; }
@@ -13,6 +24,15 @@
       --red: #c2413a; --amber: #b7791f;
       --page-max-width: 1500px;
       --page-gutter: 16px;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      background-color: #000000;
+      --bg: #000000; --surface: #000000; --soft: #070707; --text: #f5f5f5;
+      --muted: #a1a1aa; --line: #242424; --blue: #80aaff; --green: #5edb91;
+      --red: #ff7f78; --amber: #f2bb68;
+      --theme-control: #0a0a0a; --theme-control-hover: #171717;
+      --theme-border-strong: #303030;
     }
     body {
       margin: 0; max-width: 100%; overflow-x: hidden;
@@ -39,6 +59,12 @@
       background: rgba(37,99,235,.18); cursor: pointer; font: inherit; line-height: 1.4;
     }
     .header-links a:hover, .header-links button:hover { color: #fff; background: rgba(37,99,235,.36); }
+    .header-links .theme-toggle { display: inline-flex; align-items: center; gap: 6px; }
+    .theme-toggle-icon { width: 13px; height: 13px; stroke: currentColor; fill: none; flex-shrink: 0; }
+    .theme-toggle-icon--moon { display: none; }
+    html[data-theme="dark"] .theme-toggle-icon--sun { display: none; }
+    html[data-theme="dark"] .theme-toggle-icon--moon { display: block; }
+    .theme-toggle:focus-visible { outline: 2px solid #8db4ff; outline-offset: 2px; }
     .stats { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
     .stat {
       min-width: 96px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.16);
@@ -357,6 +383,162 @@
       background: #fff; color: var(--blue); text-decoration: none; font-size: 12px; font-weight: 800;
     }
     .roxy-invite-link:hover { background: #e0ebff; }
+
+    /* OLED dark theme: the page and primary surfaces stay at true black. */
+    html[data-theme="dark"] body,
+    html[data-theme="dark"] header,
+    html[data-theme="dark"] nav,
+    html[data-theme="dark"] main {
+      background: #000 !important;
+      color: var(--text) !important;
+    }
+    html[data-theme="dark"] header { border-bottom: 1px solid #202020; }
+    html[data-theme="dark"] nav { border-bottom-color: #202020; }
+    html[data-theme="dark"] section.card,
+    html[data-theme="dark"] .stat,
+    html[data-theme="dark"] .config-panel label.fld,
+    html[data-theme="dark"] .roxy-workspace-box {
+      background: #000 !important;
+      border-color: var(--line) !important;
+      box-shadow: none !important;
+    }
+    html[data-theme="dark"] .head,
+    html[data-theme="dark"] .config-subhead,
+    html[data-theme="dark"] .config-subtabs,
+    html[data-theme="dark"] .btn-group,
+    html[data-theme="dark"] .account-action-group,
+    html[data-theme="dark"] .accounts-toolbar .inline-num {
+      background: var(--soft) !important;
+      border-color: var(--line) !important;
+      box-shadow: none !important;
+    }
+    html[data-theme="dark"] table,
+    html[data-theme="dark"] th,
+    html[data-theme="dark"] td,
+    html[data-theme="dark"] .table-wrap {
+      background: #000 !important;
+      color: #d6d6d6 !important;
+      border-color: #1d1d1d !important;
+    }
+    html[data-theme="dark"] thead th { background: #080808 !important; color: #a1a1aa !important; }
+    html[data-theme="dark"] tbody tr:hover td { background: #0d0d0d !important; }
+    html[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
+    html[data-theme="dark"] textarea,
+    html[data-theme="dark"] select {
+      background: #000 !important;
+      color: #f5f5f5 !important;
+      border-color: var(--theme-border-strong) !important;
+      color-scheme: dark;
+    }
+    html[data-theme="dark"] option { background: #000; color: #f5f5f5; }
+    html[data-theme="dark"] input::placeholder,
+    html[data-theme="dark"] textarea::placeholder { color: #737373 !important; }
+    html[data-theme="dark"] input:focus,
+    html[data-theme="dark"] textarea:focus,
+    html[data-theme="dark"] select:focus {
+      border-color: var(--blue) !important;
+      box-shadow: 0 0 0 3px rgba(128,170,255,.18) !important;
+      outline: none;
+    }
+    html[data-theme="dark"] button.btn,
+    html[data-theme="dark"] .actions button,
+    html[data-theme="dark"] .pager-bar button,
+    html[data-theme="dark"] .config-tabs button,
+    html[data-theme="dark"] .config-subtabs button,
+    html[data-theme="dark"] .agent-token-cell button,
+    html[data-theme="dark"] .extract-link-btn {
+      background: var(--theme-control) !important;
+      color: #e5e5e5 !important;
+      border-color: var(--theme-border-strong) !important;
+    }
+    html[data-theme="dark"] button.btn:hover:not(:disabled),
+    html[data-theme="dark"] .actions button:hover:not(:disabled),
+    html[data-theme="dark"] .pager-bar button:hover:not(:disabled),
+    html[data-theme="dark"] .config-tabs button:hover,
+    html[data-theme="dark"] .config-subtabs button:hover {
+      background: var(--theme-control-hover) !important;
+      color: #fff !important;
+    }
+    html[data-theme="dark"] button.btn.primary,
+    html[data-theme="dark"] .actions button.primary,
+    html[data-theme="dark"] .config-tabs button.active,
+    html[data-theme="dark"] .config-subtabs button.active,
+    html[data-theme="dark"] .account-action-group .primary {
+      background: #356fe0 !important; border-color: #356fe0 !important; color: #fff !important;
+    }
+    html[data-theme="dark"] button.btn.good,
+    html[data-theme="dark"] .actions button.good,
+    html[data-theme="dark"] .account-action-group .good,
+    html[data-theme="dark"] .agent-token-cell button {
+      background: #082417 !important; border-color: #1f6b45 !important; color: #72e3a2 !important;
+    }
+    html[data-theme="dark"] button.btn.danger,
+    html[data-theme="dark"] .actions button.danger,
+    html[data-theme="dark"] .account-action-group.danger-zone {
+      background: #2b0d0d !important; border-color: #7c2929 !important; color: #ff8e88 !important;
+    }
+    html[data-theme="dark"] button:disabled {
+      background: #050505 !important; border-color: #1d1d1d !important; color: #555 !important;
+    }
+    html[data-theme="dark"] h1,
+    html[data-theme="dark"] h2,
+    html[data-theme="dark"] h3,
+    html[data-theme="dark"] h4,
+    html[data-theme="dark"] label.fld,
+    html[data-theme="dark"] .main-cell { color: #f5f5f5 !important; }
+    html[data-theme="dark"] .head p,
+    html[data-theme="dark"] label.fld .hint,
+    html[data-theme="dark"] .sub-cell,
+    html[data-theme="dark"] .muted,
+    html[data-theme="dark"] .pager-info,
+    html[data-theme="dark"] .btn-group-title,
+    html[data-theme="dark"] header .meta { color: var(--muted) !important; }
+    html[data-theme="dark"] .status-available,
+    html[data-theme="dark"] .status-pending {
+      color: #8db4ff !important; background: #07152b !important; border-color: #19365f !important;
+    }
+    html[data-theme="dark"] .status-success {
+      color: #72e3a2 !important; background: #062519 !important; border-color: #1f6b45 !important;
+    }
+    html[data-theme="dark"] .status-failed {
+      color: #ff8e88 !important; background: #2b0d0d !important; border-color: #7c2929 !important;
+    }
+    html[data-theme="dark"] .status-running,
+    html[data-theme="dark"] .status-stopping,
+    html[data-theme="dark"] .status-partial_success {
+      color: #f2bb68 !important; background: #2a1b07 !important; border-color: #795016 !important;
+    }
+    html[data-theme="dark"] .status-used,
+    html[data-theme="dark"] .status-cancelled,
+    html[data-theme="dark"] .status-stopped,
+    html[data-theme="dark"] .status-disabled {
+      color: #8a8a8a !important; background: #101010 !important; border-color: #292929 !important;
+    }
+    html[data-theme="dark"] .banner.info { background: #07152b !important; color: #8db4ff !important; border-color: #19365f !important; }
+    html[data-theme="dark"] .banner.warn { background: #2a1b07 !important; color: #f2bb68 !important; border-color: #795016 !important; }
+    html[data-theme="dark"] .log { background: #000 !important; color: #d4d4d4 !important; border: 1px solid #202020; }
+    html[data-theme="dark"] #toast { background: #f5f5f5 !important; color: #000 !important; box-shadow: 0 10px 30px rgba(0,0,0,.7); }
+    html[data-theme="dark"] #logPanel:not(.hidden),
+    html[data-theme="dark"] #retryLogPanel:not(.hidden),
+    html[data-theme="dark"] #liveLogPanel:not(.hidden),
+    html[data-theme="dark"] #qrPanel:not(.hidden) {
+      background: #000 !important; border-color: #303030 !important;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.78), 0 18px 60px rgba(0,0,0,.9) !important;
+    }
+    html[data-theme="dark"] .header-links a,
+    html[data-theme="dark"] .header-links button {
+      color: #cfe0ff; background: #07152b; border-color: #244e91;
+    }
+    html[data-theme="dark"] .header-links a:hover,
+    html[data-theme="dark"] .header-links button:hover { color: #fff; background: #10264a; }
+    html[data-theme="dark"] nav button { color: #a1a1aa; }
+    html[data-theme="dark"] nav button:hover { color: #fff; }
+    html[data-theme="dark"] nav button.active { color: #fff; border-bottom-color: #80aaff; }
+    html[data-theme="dark"] input[type="checkbox"] { accent-color: #4b82ef; }
+    html[data-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+    html[data-theme="dark"] ::-webkit-scrollbar-track { background: #000; }
+    html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #292929; border: 2px solid #000; border-radius: 8px; }
+    html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
   </style>
 </head>
 <body>
@@ -368,6 +550,15 @@
       <div class="header-links">
         <a href="https://t.me/+gu_cvEKq_vcyZWRl" target="_blank" rel="noopener noreferrer">TG 交流群</a>
         <a href="/?ui=modern" title="切换到新版侧边栏 UI">切换新 UI</a>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-pressed="false" title="切换到深色模式">
+          <svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          <svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <span id="themeToggleLabel">深色模式</span>
+        </button>
         <form method="post" action="/logout"><button type="submit">退出</button></form>
       </div>
     </div>
@@ -661,6 +852,31 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const THEME_STORAGE_KEY = 'gpt_console_theme';
+function applyTheme(theme, persist = true) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  document.documentElement.style.colorScheme = next;
+  const meta = document.getElementById('themeColorMeta');
+  if (meta) meta.setAttribute('content', next === 'dark' ? '#000000' : '#ffffff');
+  const toggle = document.getElementById('themeToggle');
+  const label = document.getElementById('themeToggleLabel');
+  if (toggle) {
+    const isDark = next === 'dark';
+    toggle.setAttribute('aria-pressed', String(isDark));
+    toggle.setAttribute('title', isDark ? '切换到浅色模式' : '切换到深色模式');
+    if (label) label.textContent = isDark ? '浅色模式' : '深色模式';
+  }
+  if (persist) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
+  }
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+}
+applyTheme(document.documentElement.dataset.theme || 'light', false);
+const themeToggle = document.getElementById('themeToggle');
+if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
 let copySeq = 0;
 const copyStore = new Map();
 let ACCOUNTS = [], OUTLOOK = [], CONFIG = [];
