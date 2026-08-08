@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -22,6 +24,11 @@ _codes: dict[str, list[str]] = defaultdict(list)
 _events: dict[str, threading.Event] = {}
 # email(lower) -> waiting meta
 _waiting: dict[str, dict] = {}
+
+# 终端输入兜底：仅 CLI（main.py）显式开启。
+# WebUI 绝不能开——阻塞的 input() 会占住注册线程，导致页面提交的验证码永远没人消费。
+_stdin_enabled = False
+_stdin_reader_started = False
 
 
 def _norm(email: str) -> str:
@@ -88,8 +95,69 @@ def pop_manual_otp(email: str) -> str | None:
         return code
 
 
+def enable_stdin_fallback(enabled: bool = True) -> None:
+    """允许从终端读验证码。只有真正的交互式 CLI 才该调用。"""
+    global _stdin_enabled
+    _stdin_enabled = bool(enabled)
+
+
+def _stdin_fallback_enabled() -> bool:
+    if _stdin_enabled:
+        return True
+    return str(os.environ.get("MANUAL_OTP_STDIN", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _oldest_waiting_email() -> str | None:
+    """当前等待最久的邮箱。终端只有一个，多任务时按先来先服务派发。"""
+    with _lock:
+        if not _waiting:
+            return None
+        return min(_waiting.values(), key=lambda v: v.get("since") or 0).get("email")
+
+
+def _stdin_reader_loop() -> None:
+    """独立线程里读 stdin，读到就丢进队列。绝不阻塞等待侧。"""
+    global _stdin_reader_started
+    try:
+        while _stdin_fallback_enabled():
+            target = _oldest_waiting_email()
+            if not target:
+                time.sleep(0.5)
+                continue
+            try:
+                typed = input(f">>> 手动输入 {target} 的邮箱验证码（回车提交）: ").strip()
+            except Exception as exc:
+                logger.info("[ManualOTP] stdin 不可读，终端输入兜底已停止：%s", exc)
+                return
+            if not typed:
+                continue
+            try:
+                submit_manual_otp(_oldest_waiting_email() or target, typed)
+            except ValueError as exc:
+                logger.warning("[ManualOTP] 终端输入被拒绝：%s", exc)
+    finally:
+        with _lock:
+            _stdin_reader_started = False
+
+
+def _ensure_stdin_reader() -> None:
+    global _stdin_reader_started
+    if not _stdin_fallback_enabled():
+        return
+    try:
+        if not (getattr(sys, "stdin", None) and sys.stdin.isatty()):
+            return
+    except Exception:
+        return
+    with _lock:
+        if _stdin_reader_started:
+            return
+        _stdin_reader_started = True
+    threading.Thread(target=_stdin_reader_loop, name="manual-otp-stdin", daemon=True).start()
+
+
 def wait_for_manual_otp(email: str, *, timeout: int = 180, job_id: int | None = None) -> str:
-    """阻塞等待手动验证码。优先吃已提交的 code，否则轮询/事件等待。"""
+    """阻塞等待手动验证码。优先吃已提交的 code，否则事件等待。"""
     key = _norm(email)
     if not key:
         raise RuntimeError("手动 OTP：email 为空")
@@ -109,12 +177,8 @@ def wait_for_manual_otp(email: str, *, timeout: int = 180, job_id: int | None = 
     )
     logger.info("[ManualOTP] 请打开邮箱 %s，在 WebUI 任务旁提交 6 位验证码", email)
 
-    # CLI 交互兜底：如果有 TTY，也允许终端输入
-    try:
-        import sys
-        has_tty = bool(getattr(sys, "stdin", None) and sys.stdin.isatty())
-    except Exception:
-        has_tty = False
+    # 终端输入兜底交给独立线程，等待循环只等事件，保证 WebUI 提交能被立刻消费
+    _ensure_stdin_reader()
 
     end = time.time() + max(10, int(timeout))
     ev = _event_for(key)
@@ -122,33 +186,18 @@ def wait_for_manual_otp(email: str, *, timeout: int = 180, job_id: int | None = 
         while time.time() < end:
             code = pop_manual_otp(email)
             if code:
+                logger.info("[ManualOTP] 已取到验证码：email=%s code=%s", email, code)
                 return code
 
-            if has_tty:
-                # 非阻塞感：短暂等事件，再提示一次
-                if ev.wait(timeout=1.0):
-                    code = pop_manual_otp(email)
-                    if code:
-                        return code
-                # 给 CLI 一次机会
-                try:
-                    typed = input(f">>> 手动输入 {email} 的邮箱验证码: ").strip()
-                except EOFError:
-                    typed = ""
-                if typed:
-                    submit_manual_otp(email, typed)
-                    code = pop_manual_otp(email)
-                    if code:
-                        return code
-            else:
-                ev.wait(timeout=1.0)
+            ev.wait(timeout=1.0)
 
-            # 支持任务被手动停止
+            # 支持任务被手动停止（StopRequested 必须往上抛，不能吞）
             try:
                 from core.registration_service import check_stop_requested
-                check_stop_requested()
-            except Exception:
+            except ImportError:
                 pass
+            else:
+                check_stop_requested()
         raise TimeoutError(f"等待手动验证码超时（{timeout}s）：{email}")
     finally:
         clear_waiting(email)

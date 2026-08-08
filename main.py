@@ -302,13 +302,14 @@ def run_registration(
         current_otp = otp_code
         for otp_attempt in range(1, max_otp_attempts + 1):
             if current_otp is None:
+                # 统一走 wait_for_otp：USE_EMAIL_SERVICE=True 时自动取件，
+                # False 时内部转手动通道（WebUI 提交 / CLI 终端输入）。
+                # 不要在这里直接 input()——WebUI 里会把注册线程阻塞在 stdin 上。
                 if _email_cfg.USE_EMAIL_SERVICE:
                     logger.info(f"[OTP] 等待验证码：{email}（第 {otp_attempt}/{max_otp_attempts} 次）")
-                    current_otp = wait_for_otp(email, after_ts=otp_after_ts)
                 else:
-                    logger.info("")
-                    logger.info(f"[OTP] 请检查邮箱，输入收到的 6 位验证码（第 {otp_attempt}/{max_otp_attempts} 次）:")
-                    current_otp = input(">>> 验证码: ").strip()
+                    logger.info(f"[OTP] 手动模式：等待提交 {email} 的 6 位验证码（第 {otp_attempt}/{max_otp_attempts} 次）")
+                current_otp = wait_for_otp(email, after_ts=otp_after_ts)
 
             human_delay("otp_input")
             try:
@@ -602,6 +603,12 @@ def main():
     if args.workers > args.count:
         logger.info(f"[批量] 并发线程数 {args.workers} 大于目标数量，已按 {args.count} 个任务执行")
         args.workers = args.count
+
+    # CLI 是交互式的，手动模式下允许直接在终端敲邮箱验证码（WebUI 不开这个）
+    if not _email_cfg.USE_EMAIL_SERVICE:
+        from core.manual_otp import enable_stdin_fallback
+
+        enable_stdin_fallback()
 
     if args.workers > 1:
         batch_dir = create_batch_archive_dir(args.count, args.workers)

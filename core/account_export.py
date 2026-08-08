@@ -353,14 +353,15 @@ def setup_2fa(session: BrowserSession, email: str, otp_code: str | None = None) 
     human_delay("navigate")
 
     if otp_code is None:
+        # 同上：统一走 wait_for_otp，手动模式由其内部转手动通道，
+        # 直接 input() 会在 WebUI 里阻塞线程。
+        from core.email_provider import wait_for_otp
+
         if _email_cfg.USE_EMAIL_SERVICE:
-            from core.email_provider import wait_for_otp
             logger.info("[2FA] 自动等待邮箱重认证 OTP...")
-            otp_code = wait_for_otp(email, after_ts=reauth_otp_after_ts)
         else:
-            logger.info("")
-            logger.info("[2FA] 请检查邮箱，输入新收到的 6 位验证码")
-            otp_code = input(">>> 2FA 验证码: ").strip()
+            logger.info(f"[2FA] 手动模式：等待提交 {email} 的 6 位验证码")
+        otp_code = wait_for_otp(email, after_ts=reauth_otp_after_ts)
 
     human_delay("otp_input")
     continue_url = _validate_reauth_otp(session, otp_code)
