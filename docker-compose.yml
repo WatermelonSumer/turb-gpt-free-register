@@ -41,8 +41,7 @@ services:
       app:
         condition: service_healthy
     ports:
-      - "0.0.0.0:80:80"
-      - "0.0.0.0:443:443"
+      - "0.0.0.0:6999:443"
     volumes:
       - type: bind
         source: ./docker/nginx.conf
