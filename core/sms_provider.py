@@ -9,6 +9,7 @@
 
 当前支持：
     - GrizzlySMS：GET 文本接口，文档 https://api.grizzlysms.com
+    - SMSBower：GET 文本接口，文档 https://smsbower.app/api/?page=client
     - L：本地 JSON 管理接口，文档 L_API.md
     - H：本地 JSON 管理接口，文档 H_API.md
 
@@ -31,9 +32,13 @@ from config import IMPERSONATE
 
 logger = logging.getLogger(__name__)
 
-# GrizzlySMS 规则：号码取出后 2 分钟内不允许取消（防薅号）。
+# GrizzlySMS 与 SMSBower 都要求取号 2 分钟后才能取消。
 # 这里留 5 秒缓冲，时间到了再发 setStatus=8。
 _MIN_CANCEL_DELAY = 125
+_MIN_CANCEL_DELAY_BY_PROVIDER = {
+    "grizzly": _MIN_CANCEL_DELAY,
+    "smsbower": 125,
+}
 
 # 记录每个 activation_id 的取号时间，供 cancel() 判断是否要等。
 # 用模块级 dict 而不是改 acquire_number 返回值，保持向后兼容。
@@ -66,6 +71,15 @@ def _provider() -> str:
     return str(getattr(_cfg, "SMS_PROVIDER", "grizzly") or "grizzly").strip().lower()
 
 
+def _service_for_provider(provider: str, service: str | None) -> str:
+    """取得服务代码；兼容历史配置中的 openai 值。"""
+    value = str(service or getattr(_cfg, "SMS_SERVICE", "") or "").strip()
+    # SMSBower 服务表中的 OpenAI (ChatGPT) 代码是 dr；项目旧默认值是 openai。
+    if provider == "smsbower" and value.lower() == "openai":
+        return "dr"
+    return value
+
+
 def _request_grizzly(http: CurlSession, params: dict) -> str:
     """
     发一个 GrizzlySMS API 请求，返回去空白的响应文本。
@@ -95,6 +109,44 @@ def _request_grizzly(http: CurlSession, params: dict) -> str:
         raise SmsProviderError("激活 ID 不存在（NO_ACTIVATION）")
     if text.startswith("The service is prohibited"):
         raise SmsProviderError(f"该服务被平台禁售：{text}")
+
+    return text
+
+
+def _request_smsbower(http: CurlSession, params: dict) -> str:
+    """调用 SMSBower handler API，并把公共错误码转换为统一异常。"""
+    api_base = str(getattr(_cfg, "SMSBOWER_API_BASE", "") or "").strip()
+    api_key = str(getattr(_cfg, "SMSBOWER_API_KEY", "") or "").strip()
+    if not api_base:
+        raise SmsProviderError("SMSBOWER_API_BASE 不能为空")
+    if not api_key:
+        raise SmsProviderError("SMSBOWER_API_KEY 不能为空")
+
+    base_params = {"api_key": api_key}
+    base_params.update(params)
+    resp = http.get(api_base, params=base_params)
+    if resp.status_code != 200:
+        if resp.status_code == 401:
+            raise SmsProviderError("SMSBower API key 无效（HTTP 401）")
+        raise SmsProviderError(
+            f"SMSBower HTTP {resp.status_code}: {(resp.text or '')[:200]}"
+        )
+    text = (resp.text or "").strip()
+
+    if text == "BAD_KEY":
+        raise SmsProviderError("SMSBower API key 无效（BAD_KEY）")
+    if text == "NO_BALANCE":
+        raise SmsNoBalanceError("SMSBower 余额不足（NO_BALANCE），请充值")
+    if text == "NO_NUMBERS":
+        raise SmsNoNumbersError("SMSBower 暂无可用号码（NO_NUMBERS）")
+    if text in ("BAD_ACTION", "BAD_SERVICE", "BAD_STATUS", "BAD_COUNTRY"):
+        raise SmsProviderError(f"SMSBower 请求参数错误：{text}")
+    if text == "NO_ACTIVATION":
+        raise SmsProviderError("SMSBower 激活 ID 不存在（NO_ACTIVATION）")
+    if text == "EARLY_CANCEL_DENIED":
+        raise SmsProviderError("SMSBower 取号满 2 分钟后才允许取消（EARLY_CANCEL_DENIED）")
+    if text in ("BANNED", "ERROR_SQL", "SERVER_ERROR"):
+        raise SmsProviderError(f"SMSBower 请求失败：{text}")
 
     return text
 
@@ -322,7 +374,8 @@ def acquire_number(
     own_http = http is None
     http = http or _http()
     try:
-        if _provider() == "l":
+        provider = _provider()
+        if provider == "l":
             payload = {
                 "service": service or _cfg.SMS_SERVICE,
                 "country": country or _cfg.SMS_COUNTRY,
@@ -347,7 +400,7 @@ def acquire_number(
             logger.info(f"[SMS:L] 取号成功：id={activation_id}, phone=+{phone}")
             return activation_id, phone
 
-        if _provider() == "h":
+        if provider == "h":
             # H_API 使用 projectId + country；统一复用 SMS_SERVICE / SMS_COUNTRY，
             # 避免接码平台之间出现重复的“服务/国家”配置。
             project_id = str(service or _cfg.SMS_SERVICE).strip()
@@ -384,23 +437,27 @@ def acquire_number(
 
         params = {
             "action": "getNumber",
-            "service": service or _cfg.SMS_SERVICE,
+            "service": _service_for_provider(provider, service),
             "country": country or _cfg.SMS_COUNTRY,
         }
         if _cfg.SMS_MAX_PRICE:
             params["maxPrice"] = _cfg.SMS_MAX_PRICE
 
-        text = _request_grizzly(http, params)
+        request_handler = _request_smsbower if provider == "smsbower" else _request_grizzly
+        provider_name = "SMSBower" if provider == "smsbower" else "GrizzlySMS"
+        text = request_handler(http, params)
         # 成功格式：ACCESS_NUMBER:激活ID:号码
         if not text.startswith("ACCESS_NUMBER:"):
-            raise SmsProviderError(f"getNumber 非预期响应：{text[:200]}")
+            raise SmsProviderError(f"{provider_name} getNumber 非预期响应：{text[:200]}")
         parts = text.split(":")
         if len(parts) < 3:
-            raise SmsProviderError(f"getNumber 响应格式异常：{text[:200]}")
+            raise SmsProviderError(f"{provider_name} getNumber 响应格式异常：{text[:200]}")
         activation_id = parts[1].strip()
-        phone = parts[2].strip()
+        phone = _normalize_phone_digits(parts[2])
+        if not activation_id or not phone:
+            raise SmsProviderError(f"{provider_name} getNumber 响应缺少激活 ID 或号码：{text[:200]}")
         _ACQUIRED_AT[activation_id] = time.time()
-        logger.info(f"[SMS] 取号成功：activation_id={activation_id}, phone=+{phone}")
+        logger.info(f"[SMS:{provider_name}] 取号成功：activation_id={activation_id}, phone=+{phone}")
         return activation_id, phone
     finally:
         if own_http:
@@ -481,10 +538,13 @@ def wait_for_sms_code(
                 time.sleep(interval)
                 continue
 
-            text = _request_grizzly(http, {"action": "getStatus", "id": activation_id})
+            request_handler = _request_smsbower if provider == "smsbower" else _request_grizzly
+            text = request_handler(http, {"action": "getStatus", "id": activation_id})
 
             if text.startswith("STATUS_OK:"):
                 code = text.split(":", 1)[1].strip()
+                if not code:
+                    raise SmsProviderError(f"getStatus 返回空验证码：{text[:200]}")
                 logger.info(f"[SMS] 第 {round_no} 轮收到验证码：{code}")
                 return code
             if text == "STATUS_CANCEL":
@@ -515,10 +575,12 @@ def set_status(activation_id: str, status: int, http: CurlSession | None = None)
     own_http = http is None
     http = http or _http()
     try:
-        if _provider() == "l":
+        provider = _provider()
+        if provider == "l":
             logger.debug(f"[SMS:L] 忽略状态设置 id={activation_id}, status={status}")
             return "OK"
-        return _request_grizzly(http, {"action": "setStatus", "status": str(status), "id": activation_id})
+        request_handler = _request_smsbower if provider == "smsbower" else _request_grizzly
+        return request_handler(http, {"action": "setStatus", "status": str(status), "id": activation_id})
     finally:
         if own_http:
             http.close()
@@ -545,13 +607,20 @@ def complete(activation_id: str, http: CurlSession | None = None) -> None:
 
 def _do_cancel_sync(activation_id: str, http_factory) -> None:
     """实际的同步取消逻辑：等够 2 分钟限制 → 发请求 → 失败重试一次。"""
+    provider = _provider()
+    provider_name = "SMSBower" if provider == "smsbower" else "GrizzlySMS"
+    min_cancel_delay = (
+        _MIN_CANCEL_DELAY
+        if provider in ("grizzly", "smsbower")
+        else _MIN_CANCEL_DELAY_BY_PROVIDER.get(provider, 125)
+    )
     acquired_at = _ACQUIRED_AT.get(activation_id)
     if acquired_at is not None:
         elapsed = time.time() - acquired_at
-        if elapsed < _MIN_CANCEL_DELAY:
-            wait = _MIN_CANCEL_DELAY - elapsed
+        if elapsed < min_cancel_delay:
+            wait = min_cancel_delay - elapsed
             logger.info(
-                f"[SMS] 取消等待 GrizzlySMS 2 分钟限制：activation_id={activation_id}，"
+                f"[SMS] 取消等待 {provider_name} 2 分钟限制：activation_id={activation_id}，"
                 f"还需等 {wait:.0f}s..."
             )
             time.sleep(wait)
@@ -584,7 +653,7 @@ def cancel(activation_id: str, http: CurlSession | None = None, background: bool
     """
     取消激活（status=8），释放号码避免白扣费。
 
-    GrizzlySMS 规则：号码取出后约 2 分钟内不允许取消。本函数默认 background=True，
+    GrizzlySMS / SMSBower 规则：号码取出后约 2 分钟内不允许取消。本函数默认 background=True，
     把"等 2 分钟+取消"放到后台守护线程里执行，主流程立刻返回继续走（如换下一个号），
     避免被这 2 分钟阻塞。
 

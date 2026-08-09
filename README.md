@@ -69,6 +69,7 @@ EMAIL_SOURCE = "outlook,generic_api"
 - 支持 CPA 管理接口生成授权 URL，并提交 OAuth callback。
 - 支持接码平台：
   - GrizzlySMS
+  - SMSBower
   - 本地 L 取号服务，见 `L_API.md`
 - 手机验证支持自动取号、填号、收码、提交、失败换号重试。
 - Codex 凭证落盘到 `codex_accounts/`。
@@ -123,6 +124,7 @@ cp .env.example .env
 - `CLOUDFLARE_API_KEY` / `CLOUDFLARE_CUSTOM_AUTH`（`EMAIL_SOURCE=cloudflare` 时）
 - `CPA_MANAGEMENT_KEY`
 - `SMS_API_KEY`
+- `SMSBOWER_API_KEY`
 - `L_ADMIN_AUTH_CODE`
 - `H_ADMIN_AUTH_CODE`
 
@@ -399,13 +401,17 @@ CODEX_OAUTH_DRIVER = "browser_use"  # 可选 protocol / roxy / cloak / browser_u
 接码配置在 `config/codex.py`：
 
 ```python
-SMS_PROVIDER = "l"        # 可选 grizzly / l / h
+SMS_PROVIDER = "l"        # 可选 grizzly / smsbower / l / h
 SMS_API_KEY = "你的 GrizzlySMS key"  # 仅 GrizzlySMS 需要
-SMS_SERVICE = "openai"
+SMS_SERVICE = "openai"   # SMSBower 会把历史值 openai 兼容映射为 dr
 SMS_COUNTRY = "国家代码"
 SMS_MAX_RETRIES = 10
 SMS_CODE_WAIT = 120
 SMS_POLL_INTERVAL = 5
+
+# 若 SMS_PROVIDER="smsbower"：
+SMSBOWER_API_BASE = "https://smsbower.page/stubs/handler_api.php"
+# SMSBOWER_API_KEY 放在 .env 中
 
 # 若 SMS_PROVIDER="h"，H 固定复用：
 #   SMS_SERVICE -> H projectId
@@ -413,6 +419,17 @@ SMS_POLL_INTERVAL = 5
 H_API_BASE = "http://localhost:8788"
 H_ADMIN_AUTH_CODE = "你的H后台授权码"
 ```
+
+SMSBower 最小 `.env` 配置示例：
+
+```dotenv
+SMS_PROVIDER=smsbower
+SMSBOWER_API_KEY=你的SMSBower_API_Key
+SMS_SERVICE=dr
+SMS_COUNTRY=187
+```
+
+服务和国家代码以 [SMSBower API 文档](https://smsbower.app/api/?page=client) 中的表格为准。
 
 CPA 授权地址来源：
 

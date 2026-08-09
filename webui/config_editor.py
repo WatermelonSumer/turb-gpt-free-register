@@ -576,15 +576,15 @@ EDITABLE_FIELDS = [
 
     {
         "key": "SMS_PROVIDER", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "接码通道", "help": "grizzly / l / h；l 使用 L_API.md，h 使用 H_API.md 定义的本地取号服务",
+        "label": "接码通道", "help": "grizzly / smsbower / l / h；smsbower 使用 SMSBower 官方 API",
     },
     {
         "key": "SMS_COUNTRY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "国家代码", "help": "传给接码平台的 country；GrizzlySMS 常用：美国=187；H 通道作为 H_API.md 的 country",
+        "label": "国家代码", "help": "传给接码平台的 country；SMSBower 美国=187；请按官网国家表填写；H 通道作为 H_API.md 的 country",
     },
     {
         "key": "SMS_SERVICE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "服务/项目代码", "help": "GrizzlySMS/L 作为 service；H 通道作为 H_API.md 的 projectId",
+        "label": "服务/项目代码", "help": "GrizzlySMS/SMSBower/L 作为 service；H 通道作为 H_API.md 的 projectId",
     },
     {
         "key": "SMS_MAX_RETRIES", "file": "codex.py", "type": "int", "group": "接码平台",
@@ -597,6 +597,16 @@ EDITABLE_FIELDS = [
     {
         "key": "SMS_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
         "label": "GrizzlySMS API密钥", "help": "GrizzlySMS 平台 API Key，保存在 .env（SMS_API_KEY），不写回 config/*.py",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "SMSBOWER_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
+        "label": "SMSBower API 地址", "help": "默认 https://smsbower.page/stubs/handler_api.php",
+        "storage": "env",
+    },
+    {
+        "key": "SMSBOWER_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
+        "label": "SMSBower API 密钥", "help": "SMSBower 后台生成的 API Key，保存在 .env",
         "storage": "env", "secret": True,
     },
     {

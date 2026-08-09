@@ -41,7 +41,7 @@ CODEX_REQUEST_TIMEOUT: int = 30
 # 旧方案"复用注册的已登录 session"会撞 /choose-an-account 卡死；
 # 新方案用全新干净 session 从头登录，走 OpenAI 标准风控路径
 # （邮箱 OTP → 手机短信验证 → 选 workspace → 拿 code），
-# 手机验证靠接码平台 GrizzlySMS 自动收码。
+# 手机验证靠接码平台自动收码（支持 GrizzlySMS、SMSBower 和本地 L/H）。
 # ============================================================
 
 # 注册成功后是否自动跑 Codex 授权（True=自动，False=跳过）
@@ -92,6 +92,7 @@ CPA_SAVE_CALLBACK_RECEIPT: bool = True
 # 接码平台（手机短信验证用）
 # SMS_PROVIDER:
 #   "grizzly" = GrizzlySMS，接口说明见 https://api.grizzlysms.com
+#   "smsbower" = SMSBower，接口说明见 https://smsbower.app/api/?page=client
 #   "l"       = 本地 L 取号服务，接口说明见 L_API.md
 #   "h"       = 本地 H 取号服务，接口说明见 H_API.md
 # ============================================================
@@ -105,7 +106,11 @@ SMS_API_BASE: str = "https://api.grizzlysms.com/stubs/handler_api.php"
 # 留空时 Codex 授权的手机验证步会失败；如不需要 Codex 自动授权，把 ENABLE_CODEX_AUTO=False。
 SMS_API_KEY: str = env_str("SMS_API_KEY", "")
 
-# 服务代码：OpenAI = "dr"
+# SMSBower handler API（SMS_PROVIDER="smsbower" 时使用）
+SMSBOWER_API_BASE: str = "https://smsbower.page/stubs/handler_api.php"
+SMSBOWER_API_KEY: str = env_str("SMSBOWER_API_KEY", "")
+
+# 服务代码：SMSBower 的 OpenAI (ChatGPT) = "dr"；其他平台按各自服务表填写。
 SMS_SERVICE: str = "openai"
 
 # 国家代码：葡萄牙 = "117" / 美国 = "187"
@@ -161,4 +166,4 @@ L_ADMIN_AUTH_CODE: str = env_str("L_ADMIN_AUTH_CODE", "")
 L_PHONE_PREFIX: str = ""
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'ENABLE_CODEX_AUTO': 'bool', 'CODEX_OAUTH_DRIVER': 'str', 'CODEX_AUTH_URL_SOURCE': 'str', 'CPA_MANAGEMENT_URL': 'str', 'CPA_MANAGEMENT_KEY': 'str', 'CPA_REQUEST_TIMEOUT': 'int', 'CPA_CALLBACK_SUBMIT_RETRIES': 'int', 'CPA_CALLBACK_SUBMIT_RETRY_DELAY': 'int', 'CPA_SAVE_CALLBACK_RECEIPT': 'bool', 'SMS_PROVIDER': 'str', 'SMS_COUNTRY': 'str', 'SMS_SERVICE': 'str', 'SMS_MAX_RETRIES': 'int', 'SMS_CODE_WAIT': 'int', 'SMS_API_KEY': 'str', 'H_API_BASE': 'str', 'H_ADMIN_AUTH_CODE': 'str', 'H_PHONE_PREFIX': 'str', 'H_PHONE_ACQUIRE_MODE': 'str', 'L_API_BASE': 'str', 'L_ADMIN_AUTH_CODE': 'str', 'L_PHONE_PREFIX': 'str'})
+apply_env_overrides(globals(), {'ENABLE_CODEX_AUTO': 'bool', 'CODEX_OAUTH_DRIVER': 'str', 'CODEX_AUTH_URL_SOURCE': 'str', 'CPA_MANAGEMENT_URL': 'str', 'CPA_MANAGEMENT_KEY': 'str', 'CPA_REQUEST_TIMEOUT': 'int', 'CPA_CALLBACK_SUBMIT_RETRIES': 'int', 'CPA_CALLBACK_SUBMIT_RETRY_DELAY': 'int', 'CPA_SAVE_CALLBACK_RECEIPT': 'bool', 'SMS_PROVIDER': 'str', 'SMS_COUNTRY': 'str', 'SMS_SERVICE': 'str', 'SMS_MAX_RETRIES': 'int', 'SMS_CODE_WAIT': 'int', 'SMS_API_KEY': 'str', 'SMSBOWER_API_BASE': 'str', 'SMSBOWER_API_KEY': 'str', 'H_API_BASE': 'str', 'H_ADMIN_AUTH_CODE': 'str', 'H_PHONE_PREFIX': 'str', 'H_PHONE_ACQUIRE_MODE': 'str', 'L_API_BASE': 'str', 'L_ADMIN_AUTH_CODE': 'str', 'L_PHONE_PREFIX': 'str'})

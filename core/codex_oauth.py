@@ -4,7 +4,7 @@
 
 旧方案"复用注册的已登录 session"会撞 /choose-an-account 卡死（React SPA 解析不出
 可提交字段）。新方案改为用**全新干净 session**从头登录，走 OpenAI 标准风控路径，
-手机号验证靠接码平台自动收码，当前通过 core.sms_provider 支持 GrizzlySMS 和 L_API.md
+手机号验证靠接码平台自动收码，当前通过 core.sms_provider 支持 GrizzlySMS、SMSBower 和本地 L/H 服务
 定义的本地 L 取号服务。
 
 完整接口链（2026-06-15 浏览器抓包确认，均 POST auth.openai.com，json）：
@@ -860,7 +860,9 @@ def _do_phone_verification(session: BrowserSession) -> None:
 
     实际平台适配在 core.sms_provider：
         - SMS_PROVIDER="grizzly"：GrizzlySMS handler_api.php
+        - SMS_PROVIDER="smsbower"：SMSBower handler_api.php
         - SMS_PROVIDER="l"：L_API.md 的 /take-phone 和 /fetch-code JSON 接口
+        - SMS_PROVIDER="h"：H_API.md 的 /take-phone 和 /fetch-code JSON 接口
     """
     http = sms_provider._http()
     max_retries = _cfg.SMS_MAX_RETRIES
