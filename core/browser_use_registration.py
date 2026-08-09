@@ -487,6 +487,91 @@ def _is_email_verification_page(page) -> bool:
     return loc is not None
 
 
+def _click_use_password_if_present(page) -> bool:
+    """从邮箱验证码页切换到创建账号密码页。"""
+    selectors = [
+        "a[data-login-web-auth-control='true'][href*='/create-account/password']",
+        "a[data-login-web-auth-control='true'][href='/create-account/password']",
+        "a[href='/create-account/password']",
+        "button[name='intent'][value='use_password']",
+        "input[type='submit'][name='intent'][value='use_password']",
+        "button[name='intent'][value*='password' i]:not([value*='passwordless' i])",
+        "input[type='submit'][name='intent'][value*='password' i]:not([value*='passwordless' i])",
+        "button:has-text('使用密码继续')",
+        "button:has-text('使用密碼繼續')",
+        "button:has-text('Use a password')",
+        "button:has-text('Continue with password')",
+    ]
+    if _click_first(page, selectors, timeout_ms=5000):
+        return True
+    try:
+        return bool(page.evaluate(
+            """() => {
+              const visible = el => {
+                if (!el) return false;
+                const st = getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                return st.visibility !== 'hidden' && st.display !== 'none' && r.width > 0 && r.height > 0;
+              };
+              const enabled = el => !el.disabled && String(el.getAttribute('aria-disabled') || '').toLowerCase() !== 'true';
+              const norm = s => String(s || '').replace(/\\s+/g, '').toLowerCase();
+              const candidates = [...document.querySelectorAll('button,a,input[type="submit"],[role="button"],[role="link"]')]
+                .filter(el => visible(el) && enabled(el));
+              const btn = candidates.find(el => {
+                const name = String(el.getAttribute('name') || '').toLowerCase();
+                const value = String(el.getAttribute('value') || '').toLowerCase();
+                const attrs = [
+                  el.id, name, value, el.getAttribute('aria-label'), el.getAttribute('title'),
+                  el.getAttribute('data-testid'), el.getAttribute('data-dd-action-name'), el.className, el.textContent
+                ].join(' ').toLowerCase();
+                const text = norm(el.textContent || el.getAttribute('value') || '');
+                const excluded = /passwordless|one[-_\\s]?time|forgot.?password|reset.?password/.test(attrs)
+                  || text.includes('一次性验证码')
+                  || text.includes('一次性驗證碼')
+                  || text.includes('ワンタイムコード');
+                if (excluded) return false;
+                const intentMatch = name === 'intent' && (
+                  value === 'use_password'
+                  || value === 'password'
+                  || /use.*password|password.*continue|continue.*password|signup.*password/.test(value)
+                );
+                const textMatch = text.includes('使用密码继续')
+                  || text.includes('使用密码')
+                  || text.includes('使用密碼繼續')
+                  || text.includes('使用密碼')
+                  || text.includes('useapassword')
+                  || text.includes('usepassword')
+                  || text.includes('continuewithapassword')
+                  || text.includes('continuewithpassword')
+                  || text.includes('signupwithapassword')
+                  || text.includes('signupwithpassword')
+                  || text.includes('パスワードを使用')
+                  || text.includes('パスワードで続行')
+                  || text.includes('utiliserunmotdepasse')
+                  || text.includes('passwortverwenden')
+                  || text.includes('usarunacontraseña');
+                return intentMatch || textMatch;
+              });
+              if (!btn) return false;
+              btn.scrollIntoView({block:'center'});
+              try {
+                btn.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, cancelable:true, view:window}));
+                btn.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
+                btn.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window}));
+                btn.click();
+              } catch (e) {
+                const form = btn.closest('form');
+                if (form && typeof form.requestSubmit === 'function') form.requestSubmit(btn);
+                else if (form) form.submit();
+                else throw e;
+              }
+              return true;
+            }"""
+        ))
+    except Exception:
+        return False
+
+
 def _click_passwordless_signup_if_present(page) -> bool:
     """在注册/登录密码页优先点击“使用一次性验证码”，进入邮箱 OTP 流。"""
     selectors = [
@@ -618,11 +703,46 @@ def _fill_password_if_present(
             logger.info("[BrowserUse] 检测密码/验证码页：state=%s url=%s", state, state_info.get("url") or "-")
             last_log = time.time()
         if state == "email_verification":
-            if force and not password_submitted and not password_already_set:
+            if not force or password_submitted or password_already_set:
+                return None
+            if not _click_use_password_if_present(page):
                 raise RuntimeError(
-                    "BROWSER_USE_FORCE_PASSWORD_2FA is enabled, but registration reached email OTP before a password was submitted"
+                    "forced password mode reached email verification, but the 'Use password' control was not found"
                 )
-            return None
+            logger.info(
+                "[BrowserUse] 已在邮箱验证码页点击“使用密码继续”，等待创建账号密码页：email=%s",
+                email,
+            )
+            transition_end = min(end, time.time() + 20)
+            while time.time() < transition_end:
+                _check_manual_stop()
+                try:
+                    page = _browser_use_heartbeat(page, context=context, label="use-password-transition")
+                except Exception as exc:
+                    if _is_target_closed_error(exc):
+                        raise
+                    if not _is_transient_navigation_error(exc):
+                        raise
+                state_after = _quick_auth_state(page)
+                after_state = str(state_after.get("state") or "other")
+                after_url = str(state_after.get("url") or _page_url(page) or "").lower()
+                if after_state == "login_password" or "/log-in/password" in after_url:
+                    raise RuntimeError(
+                        f"using the password route reached an existing-account login page: {after_url or '-'}"
+                    )
+                if after_state == "password" or any(
+                    part in after_url
+                    for part in ("/create-account/password", "/u/signup/password", "/signup/password")
+                ):
+                    state_info = state_after
+                    state = "password"
+                    logger.info("[BrowserUse] 已进入创建账号密码页：url=%s", after_url or "-")
+                    break
+                time.sleep(0.2 if _fast_mode() else 0.5)
+            else:
+                raise RuntimeError(
+                    "clicked the 'Use password' control, but the signup flow did not reach the password page"
+                )
         if force and password_already_set and state in ("profile", "chatgpt"):
             return None
         if state not in ("password", "login_password"):
@@ -677,6 +797,7 @@ def _fill_password_if_present(
         if not _click_first(
             page,
             [
+                "button[data-dd-action-name='Continue'][type='submit']",
                 "button[type='submit']",
                 "button:has-text('Continue')",
                 "button:has-text('Next')",

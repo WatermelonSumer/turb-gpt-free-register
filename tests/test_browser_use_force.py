@@ -2,6 +2,7 @@
 import json
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from config import browser_use, env_loader
@@ -63,11 +64,24 @@ class _Context:
 
 
 class BrowserUseForceTests(unittest.TestCase):
-    def test_flag_default_and_webui_field(self):
-        self.assertFalse(browser_use.BROWSER_USE_FORCE_PASSWORD_2FA)
+    def test_flag_and_webui_field(self):
+        # The imported config can be overridden by the developer's local .env.
+        self.assertIsInstance(browser_use.BROWSER_USE_FORCE_PASSWORD_2FA, bool)
+        source = Path(browser_use.__file__).read_text(encoding="utf-8")
+        self.assertIn("BROWSER_USE_FORCE_PASSWORD_2FA: bool = False", source)
         fields = {item["key"]: item for item in config_editor.EDITABLE_FIELDS}
         self.assertEqual(fields["BROWSER_USE_FORCE_PASSWORD_2FA"]["type"], "bool")
         self.assertEqual(fields["BROWSER_USE_FORCE_PASSWORD_2FA"]["group"], "Browser Use")
+
+    def test_use_password_locator_uses_stable_href(self):
+        page = Mock()
+        with patch.object(registration, "_click_first", return_value=True) as click:
+            self.assertTrue(registration._click_use_password_if_present(page))
+        selectors = click.call_args.args[1]
+        self.assertEqual(
+            selectors[0],
+            "a[data-login-web-auth-control='true'][href*='/create-account/password']",
+        )
 
     def test_flag_env_override_parses_true(self):
         old_loaded = env_loader._LOADED
@@ -102,14 +116,61 @@ class BrowserUseForceTests(unittest.TestCase):
         self.assertEqual(result, "Password!1234")
         passwordless.assert_not_called()
 
-    def test_force_password_rejects_otp_before_password(self):
+    def test_force_password_enters_password_route_from_email_verification(self):
+        page = Mock()
+        states = iter([
+            {"state": "email_verification", "url": "https://auth.openai.com/email-verification"},
+            {"state": "password", "url": "https://auth.openai.com/create-account/password"},
+            {"state": "email_verification", "url": "https://auth.openai.com/email-verification"},
+        ])
+        with patch.object(registration, "_browser_use_heartbeat", return_value=page), \
+             patch.object(registration, "_quick_auth_state", side_effect=lambda _: next(states)), \
+             patch.object(registration, "_click_use_password_if_present", return_value=True) as use_password, \
+             patch.object(registration, "_fill_first", return_value=True), \
+             patch.object(registration, "_click_first", return_value=True), \
+             patch.object(registration, "_click_passwordless_signup_if_present") as passwordless, \
+             patch.object(registration, "_registration_password", return_value="Password!1234"), \
+             patch.object(registration, "_bu_delay"):
+            result = registration._fill_password_if_present(
+                page,
+                "user@example.test",
+                timeout=1,
+                force=True,
+            )
+        self.assertEqual(result, "Password!1234")
+        use_password.assert_called_once_with(page)
+        passwordless.assert_not_called()
+
+    def test_force_password_rejects_email_verification_without_password_control(self):
         page = Mock()
         with patch.object(registration, "_browser_use_heartbeat", return_value=page), \
-             patch.object(registration, "_quick_auth_state", return_value={"state": "email_verification"}), \
+             patch.object(registration, "_quick_auth_state", return_value={
+                 "state": "email_verification",
+                 "url": "https://auth.openai.com/email-verification",
+             }), \
+             patch.object(registration, "_click_use_password_if_present", return_value=False), \
              patch.object(registration, "_click_passwordless_signup_if_present") as passwordless:
-            with self.assertRaises(RuntimeError, msg="strict mode must reject passwordless registration"):
+            with self.assertRaisesRegex(RuntimeError, "Use password"):
                 registration._fill_password_if_present(page, "user@example.test", timeout=1, force=True)
         passwordless.assert_not_called()
+
+    def test_force_password_retry_keeps_existing_password_on_email_verification(self):
+        page = Mock()
+        with patch.object(registration, "_browser_use_heartbeat", return_value=page), \
+             patch.object(registration, "_quick_auth_state", return_value={
+                 "state": "email_verification",
+                 "url": "https://auth.openai.com/email-verification",
+             }), \
+             patch.object(registration, "_click_use_password_if_present") as use_password:
+            result = registration._fill_password_if_present(
+                page,
+                "user@example.test",
+                timeout=1,
+                force=True,
+                password_already_set=True,
+            )
+        self.assertIsNone(result)
+        use_password.assert_not_called()
 
     @patch.object(registration, "_wait_for_otp_with_browser_heartbeat", return_value="654321")
     def test_browser_context_2fa_flow(self, _wait_otp):
