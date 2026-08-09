@@ -10,6 +10,7 @@
 """
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 # 输出目录（与项目根 .claude/ 工作区分离，单独放在 accounts/）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_ACCOUNTS_DIR = _PROJECT_ROOT / "accounts"
+_runtime_data_value = str(os.getenv("TURB_DATA_DIR") or "").strip()
+if _runtime_data_value:
+    _RUNTIME_DATA_DIR = Path(_runtime_data_value).expanduser()
+    if not _RUNTIME_DATA_DIR.is_absolute():
+        _RUNTIME_DATA_DIR = _PROJECT_ROOT / _RUNTIME_DATA_DIR
+else:
+    _RUNTIME_DATA_DIR = _PROJECT_ROOT
+_ACCOUNTS_DIR = _RUNTIME_DATA_DIR / "accounts"
 _BATCH_ARCHIVE_LOCK = threading.RLock()
 
 

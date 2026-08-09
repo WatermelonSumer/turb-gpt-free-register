@@ -11,6 +11,8 @@
 """
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -20,39 +22,73 @@ from pathlib import Path
 from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DATA_DIR = _PROJECT_ROOT
+_RUNTIME_DATA_ENV = "TURB_DATA_DIR"
+_runtime_data_value = str(os.getenv(_RUNTIME_DATA_ENV) or "").strip()
+if _runtime_data_value:
+    _DATA_DIR = Path(_runtime_data_value).expanduser()
+    if not _DATA_DIR.is_absolute():
+        _DATA_DIR = _PROJECT_ROOT / _DATA_DIR
+else:
+    _DATA_DIR = _PROJECT_ROOT
 _LEGACY_DATA_DIR = _PROJECT_ROOT / "data"
-_LOG_DIR = _PROJECT_ROOT / "注册日志"
+_LOG_DIR = _DATA_DIR / "注册日志"
 _PLAN_CHECK_STALE_SECONDS = 120
 _PLAN_CHECK_QUEUE_STALE_SECONDS = 1800
 
-_OUTLOOK_JSON = _PROJECT_ROOT / "用于注册的邮箱.json"
-_OUTLOOK_TXT = _PROJECT_ROOT / "用于注册的邮箱.txt"
-_GENERIC_API_EMAIL_JSON = _PROJECT_ROOT / "用于注册的API邮箱.json"
-_GENERIC_API_EMAIL_TXT = _PROJECT_ROOT / "用于注册的API邮箱.txt"
+_OUTLOOK_JSON = _DATA_DIR / "用于注册的邮箱.json"
+_OUTLOOK_TXT = _DATA_DIR / "用于注册的邮箱.txt"
+_GENERIC_API_EMAIL_JSON = _DATA_DIR / "用于注册的API邮箱.json"
+_GENERIC_API_EMAIL_TXT = _DATA_DIR / "用于注册的API邮箱.txt"
 # 孤独哥 CDK 池：存卡密本身；兑换出来的邮箱另存一份，一张卡对多个邮箱。
-_LONELY_CARD_JSON = _PROJECT_ROOT / "孤独哥CDK.json"
-_LONELY_CARD_TXT = _PROJECT_ROOT / "孤独哥CDK.txt"
-_LONELY_EMAIL_JSON = _PROJECT_ROOT / "孤独哥已兑换邮箱.json"
+_LONELY_CARD_JSON = _DATA_DIR / "孤独哥CDK.json"
+_LONELY_CARD_TXT = _DATA_DIR / "孤独哥CDK.txt"
+_LONELY_EMAIL_JSON = _DATA_DIR / "孤独哥已兑换邮箱.json"
 # 孤独哥网页版：一张卡只兑换一个邮箱，所以卡和邮箱是一对一
-_LONELY_WEB_CARD_JSON = _PROJECT_ROOT / "孤独哥网页版CDK.json"
-_LONELY_WEB_CARD_TXT = _PROJECT_ROOT / "孤独哥网页版CDK.txt"
-_LONELY_WEB_EMAIL_JSON = _PROJECT_ROOT / "孤独哥网页版已兑换邮箱.json"
-_ACCOUNTS_JSON = _PROJECT_ROOT / "注册成功的邮箱.json"
-_ACCOUNTS_TXT = _PROJECT_ROOT / "注册成功的邮箱.txt"
-_TOKENS_TXT = _PROJECT_ROOT / "注册成功的token.txt"
-_JOBS_JSON = _PROJECT_ROOT / "注册任务.json"
-_VIEWER_HTML = _PROJECT_ROOT / "accounts_viewer.html"
-_CODEX_DIR = _PROJECT_ROOT / "codex_accounts"
+_LONELY_WEB_CARD_JSON = _DATA_DIR / "孤独哥网页版CDK.json"
+_LONELY_WEB_CARD_TXT = _DATA_DIR / "孤独哥网页版CDK.txt"
+_LONELY_WEB_EMAIL_JSON = _DATA_DIR / "孤独哥网页版已兑换邮箱.json"
+_ACCOUNTS_JSON = _DATA_DIR / "注册成功的邮箱.json"
+_ACCOUNTS_TXT = _DATA_DIR / "注册成功的邮箱.txt"
+_TOKENS_TXT = _DATA_DIR / "注册成功的token.txt"
+_JOBS_JSON = _DATA_DIR / "注册任务.json"
+_VIEWER_HTML = _DATA_DIR / "accounts_viewer.html"
+_CODEX_DIR = _DATA_DIR / "codex_accounts"
 # 导出状态单独存：{ "codex-邮箱-plan.json": {"exported_at": "...", "exported_count": N} }
 # 不污染 CPA 兼容的原文件
-_CODEX_EXPORT_STATE = _PROJECT_ROOT / "codex_导出状态.json"
+_CODEX_EXPORT_STATE = _DATA_DIR / "codex_导出状态.json"
 
 _LEGACY_SQLITE = _LEGACY_DATA_DIR / "registrations.db"
 _LEGACY_OUTLOOK_JSON = _LEGACY_DATA_DIR / "outlook_accounts.json"
 _LEGACY_ACCOUNTS_JSON = _LEGACY_DATA_DIR / "registered_accounts.json"
 _LEGACY_JOBS_JSON = _LEGACY_DATA_DIR / "registration_jobs.json"
 _LOCK = threading.RLock()
+_STORAGE_MIGRATION_LOCK = threading.RLock()
+
+_RUNTIME_MIGRATION_NAMES = (
+    "用于注册的邮箱.json",
+    "用于注册的邮箱.txt",
+    "用于注册的API邮箱.json",
+    "用于注册的API邮箱.txt",
+    "用于注册的域名邮箱.json",
+    "孤独哥CDK.json",
+    "孤独哥CDK.txt",
+    "孤独哥已兑换邮箱.json",
+    "孤独哥网页版CDK.json",
+    "孤独哥网页版CDK.txt",
+    "孤独哥网页版已兑换邮箱.json",
+    "注册成功的邮箱.json",
+    "注册成功的邮箱.txt",
+    "注册成功的token.txt",
+    "注册任务.json",
+    "accounts_viewer.html",
+    "codex_导出状态.json",
+    "outlook_accounts.txt",
+    "outlook_accounts_used.json",
+    "accounts",
+    "codex_accounts",
+    "codex_agent_accounts",
+    "注册日志",
+)
 
 
 def _now() -> str:
@@ -62,6 +98,38 @@ def _now() -> str:
 def _ensure_storage() -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if _DATA_DIR == _PROJECT_ROOT:
+        return
+
+    # A previous image wrote runtime files directly under /app. Copy them once
+    # into the mounted data directory when it is first introduced.
+    with _STORAGE_MIGRATION_LOCK:
+        for name in _RUNTIME_MIGRATION_NAMES:
+            source = _PROJECT_ROOT / name
+            target = _DATA_DIR / name
+            if not source.exists():
+                continue
+            try:
+                if source.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    for child in source.iterdir():
+                        child_target = target / child.name
+                        if child_target.exists():
+                            continue
+                        if child.is_dir():
+                            shutil.copytree(child, child_target)
+                        else:
+                            shutil.copy2(child, child_target)
+                else:
+                    if target.exists():
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+            except FileExistsError:
+                pass
+            except OSError:
+                # A single stale/locked artifact must not prevent WebUI startup.
+                continue
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -2901,8 +2969,12 @@ def migrate_legacy_files() -> dict:
     }
     summary.update(_migrate_legacy_sqlite())
 
-    accounts_dir = _PROJECT_ROOT / "accounts"
-    if accounts_dir.exists():
+    accounts_dirs = [_DATA_DIR / "accounts"]
+    if _DATA_DIR != _PROJECT_ROOT:
+        accounts_dirs.append(_PROJECT_ROOT / "accounts")
+    for accounts_dir in accounts_dirs:
+        if not accounts_dir.exists():
+            continue
         for jf in accounts_dir.glob("*.json"):
             try:
                 data = json.loads(jf.read_text(encoding="utf-8"))
@@ -2951,8 +3023,12 @@ def migrate_legacy_files() -> dict:
             summary["outlook_imported"] += ins
             summary["outlook_skipped"] += skip
 
-    used = _PROJECT_ROOT / "outlook_accounts_used.json"
-    if used.exists():
+    used_paths = [_DATA_DIR / "outlook_accounts_used.json"]
+    if _DATA_DIR != _PROJECT_ROOT:
+        used_paths.append(_PROJECT_ROOT / "outlook_accounts_used.json")
+    for used in used_paths:
+        if not used.exists():
+            continue
         try:
             emails = json.loads(used.read_text(encoding="utf-8"))
             for email in emails:
@@ -2996,7 +3072,7 @@ def refresh_static_viewer() -> Path:
 # Domain email pool（Cloudflare 域名邮箱跟踪）
 # ============================================================
 
-_DOMAIN_EMAIL_JSON = _PROJECT_ROOT / "用于注册的域名邮箱.json"
+_DOMAIN_EMAIL_JSON = _DATA_DIR / "用于注册的域名邮箱.json"
 
 
 def _load_domain_pool() -> list[dict]:
