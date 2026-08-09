@@ -49,6 +49,10 @@ BROWSER_USE_SESSION_TIMEOUT: int = 240
 # 快速模式：减少 Browser Use 流程里额外 human_delay 和长等待；默认开启。
 BROWSER_USE_FAST_MODE: bool = True
 
+# 强制 Browser Use 注册完成账号密码和 TOTP 2FA；失败时不保存账号。
+# 关闭时保持历史行为（密码页可走 passwordless，Browser Use 不主动设置 2FA）。
+BROWSER_USE_FORCE_PASSWORD_2FA: bool = False
+
 # 阶段耗时日志：打印 connect/goto/email/otp/phone/callback 等步骤耗时，方便定位慢点。
 BROWSER_USE_LOG_TIMING: bool = True
 
@@ -63,4 +67,4 @@ BROWSER_USE_EXTRA_QUERY: dict = {}
 BROWSER_USE_START_URL: str = "https://chatgpt.com/auth/login"
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'BROWSER_USE_API_KEY': 'str', 'BROWSER_USE_PROXY_COUNTRY_CODE': 'str', 'BROWSER_USE_USE_PROXY': 'bool', 'BROWSER_USE_PROFILE_ID': 'str', 'BROWSER_USE_CDP_BASE': 'str', 'BROWSER_USE_TIMEOUT': 'int', 'BROWSER_USE_SESSION_TIMEOUT': 'int', 'BROWSER_USE_FAST_MODE': 'bool', 'BROWSER_USE_LOG_TIMING': 'bool', 'BROWSER_USE_KEEP_BROWSER_OPEN': 'bool', 'BROWSER_USE_START_URL': 'str'})
+apply_env_overrides(globals(), {'BROWSER_USE_API_KEY': 'str', 'BROWSER_USE_PROXY_COUNTRY_CODE': 'str', 'BROWSER_USE_USE_PROXY': 'bool', 'BROWSER_USE_PROFILE_ID': 'str', 'BROWSER_USE_CDP_BASE': 'str', 'BROWSER_USE_TIMEOUT': 'int', 'BROWSER_USE_SESSION_TIMEOUT': 'int', 'BROWSER_USE_FAST_MODE': 'bool', 'BROWSER_USE_FORCE_PASSWORD_2FA': 'bool', 'BROWSER_USE_LOG_TIMING': 'bool', 'BROWSER_USE_KEEP_BROWSER_OPEN': 'bool', 'BROWSER_USE_START_URL': 'str'})

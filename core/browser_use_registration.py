@@ -11,13 +11,18 @@ Browser Use Cloud + Playwright 注册驱动。
 from __future__ import annotations
 
 import logging
+import json
 import random
 import threading
 import string
 import time
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
+
+import pyotp
 
 from config import browser_use as _cfg
 from config import twofa as _twofa_cfg
@@ -578,11 +583,22 @@ def _click_passwordless_signup_if_present(page) -> bool:
         return False
 
 
-def _fill_password_if_present(page, email: str, timeout: int = 25, context=None) -> str | None:
+def _fill_password_if_present(
+    page,
+    email: str,
+    timeout: int = 25,
+    context=None,
+    *,
+    force: bool = False,
+    password_already_set: bool = False,
+) -> str | None:
     started = time.time()
-    end = time.time() + timeout
+    force = bool(force)
+    wait_seconds = max(int(timeout or 0), 30 if force else int(timeout or 25))
+    end = time.time() + wait_seconds
     last_heartbeat = 0.0
     last_log = 0.0
+    password_submitted = False
     while time.time() < end:
         if time.time() - last_heartbeat > 3:
             try:
@@ -602,6 +618,12 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
             logger.info("[BrowserUse] 检测密码/验证码页：state=%s url=%s", state, state_info.get("url") or "-")
             last_log = time.time()
         if state == "email_verification":
+            if force and not password_submitted and not password_already_set:
+                raise RuntimeError(
+                    "BROWSER_USE_FORCE_PASSWORD_2FA is enabled, but registration reached email OTP before a password was submitted"
+                )
+            return None
+        if force and password_already_set and state in ("profile", "chatgpt"):
             return None
         if state not in ("password", "login_password"):
             # 提交邮箱后如果仍显示 /auth/login 但页面其实已经渲染验证码输入框，
@@ -609,12 +631,12 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
             # 直接交给后面的 OTP 阶段处理，避免云端会话被拖到关闭。
             # fast 模式也不要 3 秒就放弃：提交邮箱后常仍停在 /auth/login，
             # 需等跳到 auth.openai.com 或出现密码/OTP 控件。
-            if _fast_mode() and time.time() - started >= 8:
+            if not force and _fast_mode() and time.time() - started >= 8:
                 logger.info("[BrowserUse] 未检测到密码页，提前进入 OTP 阶段：state=%s url=%s", state, state_info.get("url") or "-")
                 return None
             time.sleep(0.15 if _fast_mode() else 0.4)
             continue
-        if _click_passwordless_signup_if_present(page):
+        if not force and _click_passwordless_signup_if_present(page):
             logger.info("[BrowserUse] 检测到密码页，已点击一次性验证码入口：state=%s email=%s", state, email)
             wait_end = time.time() + 20
             while time.time() < wait_end:
@@ -631,6 +653,10 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
             logger.info("[BrowserUse] 已点击一次性验证码入口，未立即检测到 OTP 页，交给后续 OTP 阶段继续处理")
             return None
         if state == "login_password":
+            if force:
+                raise RuntimeError(
+                    f"registration reached the existing-account password page; email cannot be used for forced signup: {state_info.get('url') or '-'}"
+                )
             logger.info("[BrowserUse] 当前是登录密码页但未找到一次性验证码入口，跳过密码填写并交给 OTP 阶段：url=%s", state_info.get("url") or "-")
             return None
         password = _registration_password()
@@ -662,7 +688,23 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
         ):
             page.keyboard.press("Enter")
         _bu_delay("form")
+        password_submitted = True
+        if force:
+            verify_end = time.time() + min(30, max(10, int(wait_seconds)))
+            while time.time() < verify_end:
+                state_after = _quick_auth_state(page)
+                after_state = str(state_after.get("state") or "other")
+                if after_state == "login_password":
+                    raise RuntimeError("password submission redirected to the login-password page")
+                if after_state in ("email_verification", "profile", "chatgpt"):
+                    return password
+                time.sleep(0.2 if _fast_mode() else 0.5)
+            raise RuntimeError("password was submitted, but the signup flow did not leave the password page")
         return password
+    if force and not password_already_set:
+        raise RuntimeError(
+            f"BROWSER_USE_FORCE_PASSWORD_2FA is enabled, but no signup password page appeared for {email}"
+        )
     return None
 
 
@@ -1504,6 +1546,331 @@ def _read_chatgpt_session_via_context(context, timeout_ms: int = 5000) -> dict |
         return {"_error": f"{type(exc).__name__}: {exc}"}
 
 
+def _browser_context_response_text(response) -> str:
+    """Read a Playwright APIResponse body without assuming requests.Response."""
+    try:
+        value = getattr(response, "text", "")
+        value = value() if callable(value) else value
+        return str(value or "")
+    except Exception:
+        return ""
+
+
+def _browser_context_response_json(response, label: str) -> dict:
+    try:
+        value = getattr(response, "json", None)
+        value = value() if callable(value) else value
+    except Exception as exc:
+        raise RuntimeError(
+            f"BrowserContext {label} response was not JSON: {_browser_context_response_text(response)[:300]}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"BrowserContext {label} response must be an object: {str(value)[:300]}")
+    return value
+
+
+def _browser_context_require_ok(response, label: str) -> None:
+    status = getattr(response, "status", None)
+    if status is None:
+        status = getattr(response, "status_code", None)
+    try:
+        status_int = int(status)
+    except (TypeError, ValueError):
+        status_int = 0
+    if not 200 <= status_int < 300:
+        raise RuntimeError(
+            f"BrowserContext {label} request failed: HTTP {status_int}; "
+            f"{_browser_context_response_text(response)[:400]}"
+        )
+
+
+def _browser_context_http(context, method: str, url: str, *, headers: dict, data: str | None = None, timeout_ms: int = 15000):
+    request = getattr(context, "request", None)
+    if request is None:
+        raise RuntimeError("Browser Use context.request is unavailable; cannot force 2FA")
+    fn = getattr(request, method.lower(), None)
+    if fn is None:
+        raise RuntimeError(f"Browser Use context.request does not support {method.upper()}")
+    kwargs = {"headers": headers, "timeout": timeout_ms}
+    if data is not None:
+        kwargs["data"] = data
+    return fn(url, **kwargs)
+
+
+def _browser_context_device_id(context, page) -> str:
+    """Use the browser's oai-did cookie so API calls match the registration session."""
+    try:
+        cookies = context.cookies()
+    except Exception:
+        cookies = []
+    for cookie in cookies or []:
+        if str(cookie.get("name") or "").lower() == "oai-did" and cookie.get("value"):
+            return str(cookie["value"])
+    try:
+        raw = page.evaluate("() => document.cookie || ''")
+        for item in str(raw or "").split(";"):
+            key, sep, value = item.strip().partition("=")
+            if sep and key.strip().lower() == "oai-did" and value.strip():
+                return value.strip()
+    except Exception:
+        pass
+    # A new id is only a last-resort fixture; normally Browser Use has set the
+    # cookie during the auth flow.  Add it to both domains when possible.
+    generated = str(uuid.uuid4())
+    try:
+        context.add_cookies([
+            {"name": "oai-did", "value": generated, "domain": ".chatgpt.com", "path": "/"},
+            {"name": "oai-did", "value": generated, "domain": ".auth.openai.com", "path": "/"},
+        ])
+    except Exception:
+        pass
+    return generated
+
+
+def _browser_context_page_headers(page, *, referer: str, accept: str = "*/*", origin: str | None = None) -> dict:
+    try:
+        user_agent = str(page.evaluate("() => navigator.userAgent || ''") or "").strip()
+    except Exception:
+        user_agent = ""
+    try:
+        language = str(page.evaluate("() => navigator.language || 'en-US'") or "en-US").strip()
+    except Exception:
+        language = "en-US"
+    headers = {
+        "accept": accept,
+        "accept-language": language,
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "referer": referer,
+        "priority": "u=1, i",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+    }
+    if user_agent:
+        headers["user-agent"] = user_agent
+    if origin:
+        headers["origin"] = origin
+        headers["sec-fetch-site"] = "same-origin" if str(referer).startswith(origin) else "cross-site"
+    return headers
+
+
+def _browser_context_frontend_headers(page, *, referer: str, device_id: str, origin: str = "https://chatgpt.com") -> dict:
+    headers = _browser_context_page_headers(page, referer=referer, accept="*/*", origin=origin)
+    headers.update({
+        "content-type": "application/json",
+        "oai-device-id": device_id,
+    })
+    try:
+        from config import OAI_CLIENT_BUILD_NUMBER, OAI_CLIENT_VERSION
+        headers["oai-client-build-number"] = str(OAI_CLIENT_BUILD_NUMBER)
+        headers["oai-client-version"] = str(OAI_CLIENT_VERSION)
+    except Exception:
+        pass
+    try:
+        headers["oai-language"] = str(page.evaluate("() => navigator.language || 'en-US'") or "en-US")
+    except Exception:
+        headers["oai-language"] = "en-US"
+    return headers
+
+
+def _setup_2fa_with_browser_context(context, page, email: str, access_token: str | None = None) -> str:
+    """Set up TOTP using the Browser Use context's shared cookies and IP."""
+    del access_token  # The re-auth flow deliberately obtains a fresh token.
+    try:
+        page = _pick_live_page(context, page) or page
+    except Exception:
+        pass
+    device_id = _browser_context_device_id(context, page)
+    timeout_ms = 30000 if _fast_mode() else 60000
+    request_started = time.time()
+
+    csrf_url = "https://chatgpt.com/api/auth/csrf"
+    csrf_headers = _browser_context_page_headers(
+        page,
+        referer="https://chatgpt.com/",
+        accept="application/json",
+        origin="https://chatgpt.com",
+    )
+    csrf_response = _browser_context_http(context, "get", csrf_url, headers=csrf_headers, timeout_ms=timeout_ms)
+    _browser_context_require_ok(csrf_response, "csrf")
+    csrf_data = _browser_context_response_json(csrf_response, "csrf")
+    csrf_token = str(csrf_data.get("csrfToken") or "").strip()
+    if not csrf_token:
+        raise RuntimeError(f"BrowserContext csrf response has no csrfToken: {csrf_data}")
+
+    query = urlencode({
+        "connection": "password",
+        "login_hint": email,
+        "reauth": "password",
+        "max_age": "0",
+        "ext-oai-did": device_id,
+    })
+    signin_url = "https://chatgpt.com/api/auth/signin/openai?" + query
+    signin_headers = _browser_context_page_headers(
+        page,
+        referer="https://chatgpt.com/",
+        accept="application/json",
+        origin="https://chatgpt.com",
+    )
+    signin_headers["content-type"] = "application/x-www-form-urlencoded"
+    signin_response = _browser_context_http(
+        context,
+        "post",
+        signin_url,
+        headers=signin_headers,
+        data=urlencode({
+            "callbackUrl": "https://chatgpt.com/?action=enable&factor=totp",
+            "csrfToken": csrf_token,
+            "json": "true",
+        }),
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(signin_response, "reauth signin")
+    signin_data = _browser_context_response_json(signin_response, "reauth signin")
+    auth_url = str(signin_data.get("url") or "").strip()
+    if not auth_url:
+        raise RuntimeError(f"BrowserContext reauth response has no authorize URL: {signin_data}")
+
+    navigate_headers = _browser_context_page_headers(
+        page,
+        referer="https://chatgpt.com/",
+        accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    )
+    navigate_headers.update({
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+        "sec-fetch-user": "?1",
+        "priority": "u=0, i",
+        "upgrade-insecure-requests": "1",
+    })
+    follow_response = _browser_context_http(
+        context,
+        "get",
+        auth_url,
+        headers=navigate_headers,
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(follow_response, "reauth authorize")
+
+    logger.info("[BrowserUse][2FA] waiting for re-auth email OTP: email=%s", email)
+    otp_code = _wait_for_otp_with_browser_heartbeat(
+        page,
+        context,
+        email,
+        after_ts=request_started,
+    )
+    if not otp_code:
+        raise RuntimeError("reauth email OTP was empty")
+
+    validate_url = "https://auth.openai.com/api/accounts/email-otp/validate"
+    validate_headers = _browser_context_page_headers(
+        page,
+        referer="https://auth.openai.com/email-verification",
+        accept="application/json",
+        origin="https://auth.openai.com",
+    )
+    validate_headers["content-type"] = "application/json"
+    validate_response = _browser_context_http(
+        context,
+        "post",
+        validate_url,
+        headers=validate_headers,
+        data=json.dumps({"code": str(otp_code).strip()}),
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(validate_response, "reauth OTP validate")
+    validate_data = _browser_context_response_json(validate_response, "reauth OTP validate")
+    validate_page = validate_data.get("page") if isinstance(validate_data.get("page"), dict) else {}
+    continue_url = str(
+        validate_data.get("continue_url")
+        or validate_data.get("continueUrl")
+        or validate_data.get("external_url")
+        or validate_page.get("continue_url")
+        or validate_page.get("url")
+        or ""
+    ).strip()
+    if not continue_url:
+        raise RuntimeError(f"reauth OTP response has no continue URL: {validate_data}")
+
+    callback_headers = _browser_context_page_headers(
+        page,
+        referer="https://auth.openai.com/email-verification",
+        accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    )
+    callback_headers.update({
+        "sec-fetch-site": "same-origin" if continue_url.startswith("https://auth.openai.com") else "cross-site",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+        "sec-fetch-user": "?1",
+        "priority": "u=0, i",
+        "upgrade-insecure-requests": "1",
+    })
+    callback_response = _browser_context_http(
+        context,
+        "get",
+        continue_url,
+        headers=callback_headers,
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(callback_response, "reauth callback")
+
+    session_data = _read_chatgpt_session_via_context(context, timeout_ms=timeout_ms)
+    fresh_token = str((session_data or {}).get("accessToken") or "").strip()
+    if not fresh_token:
+        raise RuntimeError(f"reauth callback did not produce a fresh ChatGPT session: {session_data}")
+
+    enroll_url = "https://chatgpt.com/backend-api/accounts/mfa/enroll"
+    enroll_headers = _browser_context_frontend_headers(
+        page,
+        referer="https://chatgpt.com/",
+        device_id=device_id,
+    )
+    enroll_headers["authorization"] = f"Bearer {fresh_token}"
+    enroll_response = _browser_context_http(
+        context,
+        "post",
+        enroll_url,
+        headers=enroll_headers,
+        data=json.dumps({"factor_type": "totp"}),
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(enroll_response, "TOTP enroll")
+    enroll_data = _browser_context_response_json(enroll_response, "TOTP enroll")
+    secret = str(enroll_data.get("secret") or enroll_data.get("totp_secret") or "").strip()
+    enrollment_id = str(enroll_data.get("session_id") or enroll_data.get("sessionId") or "").strip()
+    if not secret or not enrollment_id:
+        raise RuntimeError(f"TOTP enroll response is missing secret/session_id: {enroll_data}")
+
+    activate_url = "https://chatgpt.com/backend-api/accounts/mfa/user/activate_enrollment"
+    activate_headers = _browser_context_frontend_headers(
+        page,
+        referer="https://chatgpt.com/",
+        device_id=device_id,
+    )
+    activate_headers["authorization"] = f"Bearer {fresh_token}"
+    activate_data = {
+        "code": pyotp.TOTP(secret).now(),
+        "factor_type": "totp",
+        "session_id": enrollment_id,
+    }
+    activate_response = _browser_context_http(
+        context,
+        "post",
+        activate_url,
+        headers=activate_headers,
+        data=json.dumps(activate_data),
+        timeout_ms=timeout_ms,
+    )
+    _browser_context_require_ok(activate_response, "TOTP activate")
+    activate_result = _browser_context_response_json(activate_response, "TOTP activate")
+    success = activate_result.get("success")
+    if success is not True and str(success).strip().lower() not in ("true", "1", "yes"):
+        raise RuntimeError(f"TOTP activation did not return success=true: {activate_result}")
+    logger.info("[BrowserUse][2FA] TOTP setup completed: %s...%s", secret[:4], secret[-4:])
+    return secret
+
+
 def _read_chatgpt_session_via_page(page, timeout_ms: int = 5000) -> dict | None:
     """页面内读取 session，加 JS AbortController，避免 page.evaluate 无限挂住。"""
     try:
@@ -1657,6 +2024,13 @@ def run_browser_use_registration(
         provider_prefix = "browser_use"
         client = BrowserUseClient()
 
+    force_password_2fa = (
+        provider_prefix == "browser_use"
+        and bool(getattr(_cfg, "BROWSER_USE_FORCE_PASSWORD_2FA", False))
+    )
+    if force_password_2fa:
+        logger.info("[BrowserUse] forced password + TOTP 2FA mode is enabled")
+
     _set_log_provider_label(cloud_label)
     _t_all = _StepTimer(f"{cloud_label} 注册全流程")
     session_info_open = client.open_session()
@@ -1721,7 +2095,14 @@ def run_browser_use_registration(
 
             _t_pwd = _StepTimer("检测/处理密码页")
             try:
-                openai_password = _fill_password_if_present(page, email, timeout=8 if _fast_mode() else 15, context=context)
+                openai_password = _fill_password_if_present(
+                    page,
+                    email,
+                    timeout=35 if force_password_2fa else (8 if _fast_mode() else 15),
+                    context=context,
+                    force=force_password_2fa,
+                )
+                page = _pick_live_page(context, page) or page
                 _t_pwd.done("password_set=yes" if openai_password else "password_set=no")
             except Exception as exc:
                 _t_pwd.done(f"failed={type(exc).__name__}: {str(exc)[:160]}")
@@ -1755,17 +2136,26 @@ def run_browser_use_registration(
                     logger.info("[BrowserUse][OTP] 已重新提交邮箱：%s", email)
                     _assert_not_external_idp(page, "重新提交邮箱后")
                     try:
-                        pwd = _fill_password_if_present(page, email, timeout=6 if _fast_mode() else 10, context=context)
+                        password_required = force_password_2fa and not bool(openai_password)
+                        pwd = _fill_password_if_present(
+                            page,
+                            email,
+                            timeout=35 if force_password_2fa else (6 if _fast_mode() else 10),
+                            context=context,
+                            force=force_password_2fa,
+                            password_already_set=bool(openai_password),
+                        )
+                        page = _pick_live_page(context, page) or page
                         _check_manual_stop()
                         if pwd:
                             openai_password = pwd
                     except Exception as pwd_exc:
-                        if _is_manual_stop_exception(pwd_exc):
+                        if _is_manual_stop_exception(pwd_exc) or password_required:
                             raise
                         logger.info("[BrowserUse][OTP] 重启 OTP 流后密码页处理跳过/失败，继续等待验证码页：%s", str(pwd_exc)[:140])
                     _bu_delay("api")
                 except Exception as restart_exc:
-                    if _is_manual_stop_exception(restart_exc):
+                    if _is_manual_stop_exception(restart_exc) or force_password_2fa:
                         raise
                     logger.warning("[BrowserUse][OTP] 重新触发邮箱 OTP 失败，继续按当前页面处理：%s: %s", type(restart_exc).__name__, str(restart_exc)[:180])
 
@@ -1851,10 +2241,24 @@ def run_browser_use_registration(
             create_acknowledged = True
             logger.info("[BrowserUse] 已拿到 accessToken：%s", email)
 
-            if _twofa_cfg.ENABLE_2FA:
-                logger.warning("[BrowserUse] 当前路径暂不自动设置 2FA，已跳过")
             totp_secret = None
-
+            if force_password_2fa:
+                _t_2fa = _StepTimer("BrowserUse forced TOTP 2FA")
+                try:
+                    totp_secret = _setup_2fa_with_browser_context(
+                        context,
+                        page,
+                        email,
+                        access_token=access_token,
+                    )
+                    if not totp_secret:
+                        raise RuntimeError("forced TOTP setup returned an empty secret")
+                    _t_2fa.done("totp_set=yes")
+                except Exception as exc:
+                    _t_2fa.done(f"failed={type(exc).__name__}: {str(exc)[:160]}")
+                    raise
+            elif _twofa_cfg.ENABLE_2FA:
+                logger.warning("[BrowserUse] 当前路径暂不自动设置 2FA，已跳过")
             codex_result = {
                 "status": "skipped",
                 "ok": True,

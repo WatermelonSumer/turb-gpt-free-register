@@ -131,6 +131,10 @@ EDITABLE_FIELDS = [
         "label": "快速模式", "help": "减少 Browser Use 额外等待和 humanize 延迟；建议开启，异常排查时可关闭",
     },
     {
+        "key": "BROWSER_USE_FORCE_PASSWORD_2FA", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
+        "label": "强制设置密码和 2FA", "help": "开启后跳过 passwordless，强制提交账号密码并完成 TOTP 2FA；任一步骤失败都不保存账号",
+    },
+    {
         "key": "BROWSER_USE_LOG_TIMING", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
         "label": "耗时日志", "help": "打印 Browser Use 各阶段耗时：连接、打开页面、邮箱、OTP、手机、callback",
     },
