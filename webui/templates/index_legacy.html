@@ -1056,6 +1056,7 @@ function syncDynamicPickupSources(summary) {
   };
   addOptions('regSource');
   addOptions('poolSource');
+  addOptions('importSource');
 }
 $('#regSource').addEventListener('change', loadSummary);
 
@@ -2715,12 +2716,12 @@ $('#poolSource').addEventListener('change', () => {
   PAGERS.outlook.page = 1;
   OUTLOOK_SELECTED.clear();
   if ($('#poolSource').value !== 'all' && $('#poolSource').value !== 'cloudflare_domain') {
-    $('#importSource').value = isPickupDomainSource($('#poolSource').value) ? 'generic_api' : $('#poolSource').value;
+    $('#importSource').value = $('#poolSource').value;
   }
   loadOutlook();
 });
 $('#importSource').addEventListener('change', () => {
-  if ($('#importSource').value === 'generic_api') $('#importAsRegistered').checked = false;
+  if ($('#importSource').value === 'generic_api' || isPickupDomainSource($('#importSource').value)) $('#importAsRegistered').checked = false;
   $('#poolSource').value = $('#importSource').value;
   PAGERS.outlook.page = 1;
   OUTLOOK_SELECTED.clear();
@@ -2823,7 +2824,7 @@ $('#btnImport').addEventListener('click', async () => {
   $('#btnImport').disabled = true;
   try {
     const source = $('#importSource').value;
-    const as_registered = source === 'generic_api' ? false : ($('#importAsRegistered')?.checked ?? true);
+    const as_registered = source === 'generic_api' || isPickupDomainSource(source) ? false : ($('#importAsRegistered')?.checked ?? true);
     const r = await api('/api/outlook/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, source, as_registered}) });
     const mode = r.as_registered ? '已注册账号' : '邮箱池素材';
     $('#importResult').innerHTML = `<div class="banner info">按 ${mode} 导入：解析 ${r.parsed} 行，新增 ${r.inserted}，跳过 ${r.skipped}${r.as_registered ? '；可到“账号”页选择后批量补跑 Codex' : ''}</div>`;
@@ -2831,7 +2832,8 @@ $('#btnImport').addEventListener('click', async () => {
     const importedSource = Array.isArray(r.sources) && r.sources.length === 1 ? r.sources[0] : source;
     try { syncDynamicPickupSources(await api('/api/summary')); } catch (_) {}
     $('#poolSource').value = importedSource;
-    if (source === 'generic_api') $('#importAsRegistered').checked = false;
+    $('#importSource').value = importedSource;
+    if (source === 'generic_api' || isPickupDomainSource(source)) $('#importAsRegistered').checked = false;
     loadOutlook(); loadAccounts(); loadSummary();
   } catch(e) { $('#importResult').innerHTML = `<div class="banner warn">${esc(e.message)}</div>`; }
   finally { $('#btnImport').disabled = false; }

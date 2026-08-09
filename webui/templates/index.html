@@ -3226,6 +3226,12 @@ function syncDynamicPickupSourceMenus(summary) {
     const hidden = document.getElementById('poolSourceV2');
     if (hidden) onPoolSourceChange(hidden);
   });
+  addToMenu('importSourceV2Wrap', (source, wrap) => {
+    setImportSourceV2(source);
+    wrap.classList.remove('open');
+    const button = wrap.querySelector('.outlook-v2-select-btn');
+    if (button) button.setAttribute('aria-expanded', 'false');
+  });
 }
 function getRegSource() {
   const el = document.getElementById('regSourceV2');
@@ -5464,7 +5470,8 @@ function setImportSourceV2(val) {
   const btn = document.getElementById('importSourceV2Btn');
   const wrap = document.getElementById('importSourceV2Wrap');
   if (!hidden) return;
-  const next = IMPORT_SOURCE_LABELS[val] ? val : 'outlook';
+  const candidate = String(val || '').trim().toLowerCase();
+  const next = (IMPORT_SOURCE_LABELS[candidate] || isPickupDomainSource(candidate)) ? candidate : 'outlook';
   hidden.value = next;
   if (btn) btn.textContent = IMPORT_SOURCE_LABELS[next] || next;
   if (wrap) {
@@ -5473,14 +5480,14 @@ function setImportSourceV2(val) {
     });
   }
   const ta = document.getElementById('importTextV2');
-  if (ta) ta.placeholder = IMPORT_PLACEHOLDERS[next] || '';
+  if (ta) ta.placeholder = IMPORT_PLACEHOLDERS[next] || IMPORT_PLACEHOLDERS.generic_api || '';
   // CDK 导入的是卡密不是邮箱，邮箱要等注册时兑换，「按已注册账号导入」不适用。
   const regWrap = document.getElementById('importAsRegisteredWrapV2');
   const regEl = document.getElementById('importAsRegisteredV2');
   const isCdk = CDK_IMPORT_SOURCES.includes(next);
   if (regWrap) regWrap.style.display = isCdk ? 'none' : '';
   if (regEl && isCdk) regEl.checked = false;
-  if (regEl && next === 'generic_api') regEl.checked = false;
+  if (regEl && (next === 'generic_api' || isPickupDomainSource(next))) regEl.checked = false;
   if (regEl && next === 'outlook') regEl.checked = true;
 }
 function openOutlookImportModal() {
@@ -5489,8 +5496,7 @@ function openOutlookImportModal() {
   const result = $('#importResultV2');
   if (result) result.innerHTML = '';
   const pool = getPoolSource();
-  if (pool === 'outlook' || pool === 'generic_api' || pool === 'lonely' || pool === 'lonely_web') setImportSourceV2(pool);
-  else if (isPickupDomainSource(pool)) setImportSourceV2('generic_api');
+  if (pool === 'outlook' || pool === 'generic_api' || pool === 'lonely' || pool === 'lonely_web' || isPickupDomainSource(pool)) setImportSourceV2(pool);
   else setImportSourceV2('outlook');
   modal.classList.remove('hidden');
   updateModalScrollLock();
@@ -5558,7 +5564,8 @@ async function doImportOutlook() {
   if (submitBtn) submitBtn.disabled = true;
   try {
     // CDK 兑换出的邮箱要等注册时才产生，不能按已注册账号导入。
-    const as_registered = isCdk ? false : (registeredEl ? !!registeredEl.checked : true);
+    const isPickup = source === 'generic_api' || isPickupDomainSource(source);
+    const as_registered = isCdk || isPickup ? false : (registeredEl ? !!registeredEl.checked : true);
     const r = await api('/api/outlook/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, source, as_registered}) });
     const mode = isCdk ? 'CDK 卡密' : (r.as_registered ? '已注册账号' : '邮箱池素材');
     const tail = source === 'lonely'
