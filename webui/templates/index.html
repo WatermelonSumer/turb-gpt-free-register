@@ -783,7 +783,7 @@
     .accounts-table-v2-wrap { overflow: auto; padding: 0; }
     .accounts-table-v2 {
       width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px;
-      min-width: 1280px;
+      min-width: 1390px;
     }
     .accounts-table-v2 th, .accounts-table-v2 td {
       padding: 12px 12px; border-bottom: 1px solid #ebeef5;
@@ -804,7 +804,8 @@
     .accounts-table-v2 .col-id { width: 72px; }
     .accounts-table-v2 .col-email { width: 240px; }
     .accounts-table-v2 .col-source { width: 90px; }
-    .accounts-table-v2 .col-token { width: 100px; }
+    .accounts-table-v2 .col-password { width: 110px; }
+    .accounts-table-v2 .col-token { width: 120px; }
     .accounts-table-v2 .col-plan { width: 120px; }
     .accounts-table-v2 .col-note { width: 140px; }
     .accounts-table-v2 .col-small { width: 72px; }
@@ -873,17 +874,23 @@
     .accounts-table-v2 .pill.status-running {
       color: #fa8c16; background: #fff7e6; border-color: #ffd591;
     }
-    .accounts-table-v2 .acc-v2-token-copy {
+    .accounts-table-v2 .acc-v2-token-copy,
+    .accounts-table-v2 .acc-v2-secret-copy {
       display: inline-flex; align-items: center; justify-content: center;
       height: 26px; padding: 0 10px; border-radius: 4px;
       border: 1px solid #9ee0d6; box-sizing: border-box;
       font: inherit; font-size: 13px; font-weight: 500; line-height: 1;
       color: #2bb8a6; background: #E7FCF8; cursor: pointer; white-space: nowrap;
     }
-    .accounts-table-v2 .acc-v2-token-copy:hover:not(:disabled) {
+    .accounts-table-v2 .acc-v2-secret-copy {
+      font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+    }
+    .accounts-table-v2 .acc-v2-token-copy:hover:not(:disabled),
+    .accounts-table-v2 .acc-v2-secret-copy:hover:not(:disabled) {
       background: #2bb8a6; border-color: #2bb8a6; color: #fff;
     }
-    .accounts-table-v2 .acc-v2-token-copy:disabled {
+    .accounts-table-v2 .acc-v2-token-copy:disabled,
+    .accounts-table-v2 .acc-v2-secret-copy:disabled {
       opacity: .55; cursor: not-allowed;
     }
     .accounts-table-v2 .acc-v2-codex {
@@ -2292,6 +2299,7 @@
     html[data-theme="dark"] .roxy-invite-link:hover { background: #10264a !important; }
     html[data-theme="dark"] .agent-token-cell button,
     html[data-theme="dark"] .accounts-table-v2 .acc-v2-token-copy,
+    html[data-theme="dark"] .accounts-table-v2 .acc-v2-secret-copy,
     html[data-theme="dark"] .codex-table-v2 .acc-v2-token-copy,
     html[data-theme="dark"] .outlook-table-v2 .acc-v2-token-copy,
     html[data-theme="dark"] .accounts-table-v2 .extract-link-cell button,
@@ -2649,7 +2657,7 @@
         <table class="accounts-table-v2">
           <colgroup>
             <col class="col-check"><col class="col-id"><col class="col-email"><col class="col-source">
-            <col class="col-token"><col class="col-plan"><col class="col-note"><col class="col-small">
+            <col class="col-password"><col class="col-token"><col class="col-plan"><col class="col-note"><col class="col-small">
             <col class="col-status"><col class="col-agent"><col class="col-time"><col class="col-actions">
           </colgroup>
           <thead>
@@ -2658,7 +2666,8 @@
               <th class="col-id">ID</th>
               <th class="col-email">邮箱</th>
               <th class="col-source">来源</th>
-              <th class="col-token">Token</th>
+              <th class="col-password">密码</th>
+              <th class="col-token">AT</th>
               <th class="col-plan">套餐</th>
               <th class="col-note">备注</th>
               <th class="col-small">2FA</th>
@@ -3988,9 +3997,13 @@ function _tokenCellV2(r) {
   else if (live === 'deactivated') liveHtml = `<div class="acc-v2-sub" title="${esc(liveErr || liveAt)}" style="color:#f56c6c">查活: 已废</div>`;
   else if (live === 'failed') liveHtml = `<div class="acc-v2-sub" title="${esc(liveErr || liveAt)}" style="color:#e6a23c">查活: 失败</div>`;
   if (r.has_access_token) {
-    return `<button type="button" class="acc-v2-token-copy" data-account-copy-secret="access_token" data-account-id="${esc(r.id)}" title="复制完整 Token">复制</button>${liveHtml}`;
+    return `<button type="button" class="acc-v2-secret-copy" data-account-copy-secret="access_token" data-account-id="${esc(r.id)}" title="点击复制完整 AT">${esc(r.access_token_tail || '')}</button>${liveHtml}`;
   }
-  return `<span class="pill status-failed">无Token</span>${liveHtml}`;
+  return `<span class="pill status-failed">无AT</span>${liveHtml}`;
+}
+function _passwordCellV2(r) {
+  if (!r.has_password) return '<span class="acc-v2-muted">无密码</span>';
+  return `<button type="button" class="acc-v2-secret-copy" data-account-copy-secret="password" data-account-id="${esc(r.id)}" title="点击复制完整密码">********</button>`;
 }
 function _accountsV2MoreMenu(r) {
   const parts = [
@@ -4040,6 +4053,7 @@ function renderAccounts() {
         <div class="acc-v2-sub">${esc(r.user_name || '-')}</div>
       </td>
       <td class="col-source">${esc(r.email_source || '-')}</td>
+      <td class="col-password">${_passwordCellV2(r)}</td>
       <td class="col-token">${_tokenCellV2(r)}</td>
       <td class="col-plan">${_planCell(r)}<div class="acc-v2-sub">${_extractLinkCell(r)}</div></td>
       <td class="col-note" title="${esc(r.note || '')}">${r.note ? esc(short(r.note, 80)) : '<span class="acc-v2-muted">-</span>'}</td>
@@ -4060,7 +4074,7 @@ function renderAccounts() {
 
   const bodyV2 = $('#accountsBodyV2');
   if (bodyV2) {
-    bodyV2.innerHTML = rows.map(rowHtmlV2).join('') || '<tr><td colspan="12" style="text-align:center;color:#909399;padding:28px;">暂无账号</td></tr>';
+    bodyV2.innerHTML = rows.map(rowHtmlV2).join('') || '<tr><td colspan="13" style="text-align:center;color:#909399;padding:28px;">暂无账号</td></tr>';
   }
   updateAccountSelectionUi(rows);
   _renderPager('accounts', total);
@@ -4190,7 +4204,7 @@ async function onAccountsBodyClick(e) {
       const value = await fetchOneAccountSecret(id, field);
       if (!value) { showToast('可复制内容为空'); return; }
       copyText(value);
-      showToast(field === 'access_token' ? 'Token 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
+      showToast(field === 'password' ? '密码已复制' : field === 'access_token' ? 'AT 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
     } catch(err) {
       showToast('复制失败: ' + err.message);
     } finally {

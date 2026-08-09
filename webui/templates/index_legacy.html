@@ -139,6 +139,7 @@
     .col-status { width: 96px; }
     .col-email { width: 260px; }
     .col-source { width: 96px; }
+    .col-password { width: 110px; }
     .col-token { width: 220px; }
     .col-note { width: 180px; }
     .col-small { width: 78px; }
@@ -149,16 +150,17 @@
     .col-error { width: 320px; }
     .col-actions { width: 220px; }
     .jobs-table .col-actions { width: 330px; }
-    .accounts-table .col-token { width: 92px; }
+    .accounts-table .col-password { width: 92px; }
+    .accounts-table .col-token { width: 108px; }
     .accounts-table .col-plan { width: 340px; }
     .accounts-table .col-note { width: 180px; }
     .accounts-table .col-agent { width: 220px; }
     .accounts-table .col-actions { width: 360px; }
-    .accounts-table td:nth-child(6), .accounts-table th:nth-child(6) { overflow: visible; text-overflow: clip; }
-    .accounts-table td:nth-child(10), .accounts-table th:nth-child(10) { overflow: visible; text-overflow: clip; }
-
-    .accounts-table td:nth-child(8), .accounts-table th:nth-child(8) { overflow: visible; text-overflow: clip; }
+    .accounts-table td:nth-child(7), .accounts-table th:nth-child(7) { overflow: visible; text-overflow: clip; }
     .accounts-table td:nth-child(11), .accounts-table th:nth-child(11) { overflow: visible; text-overflow: clip; }
+
+    .accounts-table td:nth-child(9), .accounts-table th:nth-child(9) { overflow: visible; text-overflow: clip; }
+    .accounts-table td:nth-child(12), .accounts-table th:nth-child(12) { overflow: visible; text-overflow: clip; }
     .outlook-table .col-actions { width: 220px; }
     .codex-table .col-actions { width: 260px; }
     th { position: sticky; top: 0; background: #fbfcfe; color: #475467; z-index: 1; font-size: 12px; }
@@ -243,7 +245,8 @@
     .accounts-table .col-id { width: 52px; }
     .accounts-table .col-email { width: 250px; }
     .accounts-table .col-source { width: 80px; }
-    .accounts-table .col-token { width: 92px; }
+    .accounts-table .col-password { width: 92px; }
+    .accounts-table .col-token { width: 108px; }
     .accounts-table .col-plan { width: 300px; }
     .accounts-table .col-note { width: 150px; }
     .accounts-table .col-small { width: 76px; }
@@ -254,6 +257,13 @@
     .accounts-table .main-cell { font-size: 12px; }
     .accounts-table .sub-cell { margin-top: 1px; font-size: 11px; }
     .accounts-table .mono { font-size: 11px; }
+    .accounts-table .account-secret-copy {
+      min-height: 24px; padding: 0 8px; border: 1px solid #b9dfc9; border-radius: 5px;
+      background: #edf8f1; color: #166534; cursor: pointer;
+      font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+      font-size: 11px; font-weight: 800; line-height: 1; white-space: nowrap;
+    }
+    .accounts-table .account-secret-copy:hover:not(:disabled) { background: #dff3e7; }
     .accounts-table .pill { min-width: auto; padding: 2px 6px; font-size: 11px; }
     .accounts-table .actions { gap: 4px; }
     .accounts-table .actions button { min-height: 24px; padding: 0 7px; font-size: 11px; border-radius: 5px; transition: transform .12s ease, box-shadow .12s ease, background .12s ease; }
@@ -445,6 +455,7 @@
     html[data-theme="dark"] .pager-bar button,
     html[data-theme="dark"] .config-tabs button,
     html[data-theme="dark"] .config-subtabs button,
+    html[data-theme="dark"] .account-secret-copy,
     html[data-theme="dark"] .agent-token-cell button,
     html[data-theme="dark"] .extract-link-btn {
       background: var(--theme-control) !important;
@@ -469,6 +480,7 @@
     html[data-theme="dark"] button.btn.good,
     html[data-theme="dark"] .actions button.good,
     html[data-theme="dark"] .account-action-group .good,
+    html[data-theme="dark"] .account-secret-copy,
     html[data-theme="dark"] .agent-token-cell button {
       background: #082417 !important; border-color: #1f6b45 !important; color: #72e3a2 !important;
     }
@@ -711,10 +723,10 @@
       </div>
       <div class="table-wrap">
         <table class="accounts-table">
-          <colgroup><col class="col-check"><col class="col-id"><col class="col-email"><col class="col-source"><col class="col-token"><col class="col-plan"><col class="col-note"><col class="col-small"><col class="col-status"><col class="col-agent"><col class="col-time"><col class="col-actions"></colgroup>
+          <colgroup><col class="col-check"><col class="col-id"><col class="col-email"><col class="col-source"><col class="col-password"><col class="col-token"><col class="col-plan"><col class="col-note"><col class="col-small"><col class="col-status"><col class="col-agent"><col class="col-time"><col class="col-actions"></colgroup>
           <thead><tr>
             <th><input type="checkbox" id="accountsSelectAll" title="全选/取消全选当前页账号"></th>
-            <th>ID</th><th>邮箱</th><th>来源</th><th>Token</th><th>套餐</th><th>备注</th><th>2FA</th><th>Codex</th><th>Agent Token</th><th>创建时间</th><th>操作</th>
+            <th>ID</th><th>邮箱</th><th>来源</th><th>密码</th><th>AT</th><th>套餐</th><th>备注</th><th>2FA</th><th>Codex</th><th>Agent Token</th><th>创建时间</th><th>操作</th>
           </tr></thead>
           <tbody id="accountsBody"></tbody>
         </table>
@@ -1678,6 +1690,16 @@ function _liveStatusSub(r) {
   if (s === 'failed') return `<div class="sub-cell" style="color:#e6a23c" title="${esc(err || at)}">查活: 失败</div>`;
   return '';
 }
+function _passwordCell(r) {
+  if (!r.has_password) return '<span class="muted">无密码</span>';
+  return `<button type="button" class="account-secret-copy" data-account-copy-secret="password" data-account-id="${esc(r.id)}" title="点击复制完整密码">********</button>`;
+}
+function _accessTokenCell(r) {
+  const token = r.has_access_token
+    ? `<button type="button" class="account-secret-copy" data-account-copy-secret="access_token" data-account-id="${esc(r.id)}" title="点击复制完整 AT">${esc(r.access_token_tail || '')}</button>`
+    : '<span class="muted">无AT</span>';
+  return token + _liveStatusSub(r);
+}
 function renderAccounts() {
   const p = PAGERS.accounts;
   const total = ACCOUNTS_TOTAL;
@@ -1688,7 +1710,8 @@ function renderAccounts() {
       <td class="muted">#${esc(r.id)}</td>
       <td><div class="main-cell">${esc(r.email)}${r.archived ? ' <span class="pill status-used" title="该账号已归档">归档</span>' : ''}</div><div class="sub-cell">${esc(r.user_name || '-')}</div></td>
       <td>${esc(r.email_source || '-')}</td>
-      <td><span class="mono" title="列表仅显示预览，完整 Token 请点复制">${r.has_access_token ? '有Token' : '<span class="muted">无Token</span>'}</span>${_liveStatusSub(r)}</td>
+      <td>${_passwordCell(r)}</td>
+      <td>${_accessTokenCell(r)}</td>
       <td>${_planCell(r)}<div class="sub-cell">${_extractLinkCell(r)}</div></td>
       <td class="wrap" title="${esc(r.note || '')}">${r.note ? esc(short(r.note, 80)) : '<span class="muted">-</span>'}</td>
       <td>${r.totp_enabled ? '已启用' : '<span class="muted">未启用</span>'}</td>
@@ -1703,7 +1726,7 @@ function renderAccounts() {
           <div class="account-action-group danger-zone"><button data-account-archive="${esc(r.id)}" data-archived="${r.archived ? '0' : '1'}" title="${r.archived ? '恢复到默认账号列表' : '归档后默认账号列表不再显示'}">${r.archived ? '恢复' : '归档'}</button> <button class="danger" data-account-delete="${esc(r.id)}" data-email="${esc(r.email)}">删除</button></div>
         </div>
       </td>
-    </tr>`).join('') || '<tr><td colspan="12" class="muted">暂无账号</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="13" class="muted">暂无账号</td></tr>';
   updateAccountSelectionUi(rows);
   _renderPager('accounts', total);
 }
@@ -1840,7 +1863,7 @@ $('#accountsBody').addEventListener('click', async (e) => {
       const value = await fetchOneAccountSecret(id, field);
       if (!value) { showToast('可复制内容为空'); return; }
       copyText(value);
-      showToast(field === 'access_token' ? 'Token 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
+      showToast(field === 'password' ? '密码已复制' : field === 'access_token' ? 'AT 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
     } catch(err) {
       showToast('复制失败: ' + err.message);
     } finally {

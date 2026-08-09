@@ -92,14 +92,18 @@ def _compact_account_for_list(row: dict) -> dict:
     """账号列表轻量对象：只返回当前表格渲染和按钮判断必需字段。
 
     原则：
-    - 不返回完整 Token / Token 预览 / TOTP Secret / Agent Token。
+    - 不返回完整密码 / 完整 Token / TOTP Secret / Agent Token；只返回密码存在标记和 AT 尾号。
     - 时间戳、错误原因、提链详情等只在前端确实要展示时返回；空值不返回。
     - 复制/下载敏感内容时再通过 /secret 接口按需读取。
     """
+    access_token = str(row.get("access_token") or "").strip()
+    registration_password = db._account_registration_password(row)
     out = {
         "id": row.get("id"),
         "email": row.get("email"),
-        "has_access_token": bool(str(row.get("access_token") or "").strip()),
+        "has_password": bool(str(registration_password or "").strip()),
+        "has_access_token": bool(access_token),
+        "access_token_tail": access_token[-8:] if access_token else "",
         "totp_enabled": bool(row.get("totp_secret")),
         "codex_agent_has_token": bool(str(row.get("codex_agent_token") or "").strip()),
     }
@@ -147,13 +151,15 @@ def _compact_account_for_list(row: dict) -> dict:
 
 def _account_secret_value(row: dict, field: str) -> str:
     field = (field or "").strip()
+    if field == "password":
+        return db._account_registration_password(row)
     if field == "access_token":
         return str(row.get("access_token") or "")
     if field == "copy_line":
         return str(row.get("copy_line") or "")
     if field == "codex_agent_token":
         return str(row.get("codex_agent_token") or "")
-    raise ValueError("field 仅支持 access_token/copy_line/codex_agent_token")
+    raise ValueError("field 仅支持 password/access_token/copy_line/codex_agent_token")
 
 
 def _compact_job_for_list(row: dict) -> dict:
