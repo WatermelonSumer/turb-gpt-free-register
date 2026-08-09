@@ -33,8 +33,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://sms.iosmq.xyz"
 REQUEST_TIMEOUT = 70  # poll=true 时服务端会挂起等新码，超时给宽一点
 
-REDEEM_RETRY_TIMES = 5
+REDEEM_RETRY_TIMES = 3
 REDEEM_RETRY_INTERVAL = 1.0
+
+# redeem 成功后服务端还可能需要很短时间才创建好 session。这个阶段不能把卡
+# 放回可用池，否则下一条任务会再次领取同一张已消耗的卡。
+POST_REDEEM_LOOKUP_RETRY_TIMES = 3
+POST_REDEEM_LOOKUP_RETRY_INTERVAL = 1.0
 
 # 业务码：重试没意义的那些
 CODE_OK = "0"
@@ -196,6 +201,41 @@ def lookup_order(card_code: str, poll: bool = True, base_url: str | None = None,
     }
 
 
+def _lookup_after_redeem(card_code: str, *, base_url: str, attempts: int = POST_REDEEM_LOOKUP_RETRY_TIMES) -> dict:
+    """兑换确认后读取邮箱，给服务端 session 建立留出几次重试机会。"""
+    last_exc: Exception | None = None
+    total = max(1, int(attempts))
+    for attempt in range(1, total + 1):
+        try:
+            info = lookup_order(card_code, poll=False, base_url=base_url, timeout=30)
+            if info.get("email") and "@" in str(info["email"]):
+                return info
+            raise LonelyWebError("兑换已确认，但查单暂未返回邮箱地址")
+        except LonelyWebError as exc:
+            last_exc = exc
+            # 2005 在刚 redeem 完的瞬间是服务端最终一致性延迟，不按永久错误处理。
+            if exc.code not in (None, CODE_NOT_REDEEMED):
+                raise
+            if attempt >= total:
+                break
+            logger.warning(
+                "[LonelyWeb] 兑换后查单暂未就绪，第 %s/%s 次：%s；%.0fs 后重试",
+                attempt,
+                total,
+                str(exc)[:180],
+                POST_REDEEM_LOOKUP_RETRY_INTERVAL,
+            )
+            time.sleep(POST_REDEEM_LOOKUP_RETRY_INTERVAL)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= total:
+                break
+            time.sleep(POST_REDEEM_LOOKUP_RETRY_INTERVAL)
+    raise LonelyWebError(
+        f"孤独哥网页版兑换成功后查单 {total} 次仍未拿到邮箱: {last_exc}"
+    ) from last_exc
+
+
 def pick_account() -> LonelyWebAccount:
     """
     领一张未兑换的卡，兑换出邮箱。
@@ -213,17 +253,26 @@ def pick_account() -> LonelyWebAccount:
 
     card_code = card["card_code"]
     base = card.get("base_url") or _base_url()
+    redeem_status: str | None = None
     try:
-        redeem_card(card_code, base_url=base)
-        # redeem 不返回地址，必须再 lookup；这里 poll=false 只读当前状态。
-        info = lookup_order(card_code, poll=False, base_url=base, timeout=30)
+        redeem_status = redeem_card(card_code, base_url=base)
+        # redeem 不返回地址，必须再 lookup；刚兑换完成时给服务端一点建 session 的时间。
+        info = _lookup_after_redeem(card_code, base_url=base)
     except Exception as exc:
-        db.release_lonely_web_card(card_code, status="available", note=f"兑换失败: {exc}")
+        if redeem_status in ("redeemed", "in_use"):
+            # 服务端已经确认消耗了卡。保留 used，等待人工查单/后续处理，
+            # 不把它重新放回可用池，也不提前记为注册失败。
+            db.release_lonely_web_card(card_code, status="used", note=f"兑换成功，查单待重试: {exc}")
+        else:
+            # redeem 没有得到成功确认，卡仍可供下一次任务尝试。
+            db.release_lonely_web_card(card_code, status="available", note=f"兑换失败: {exc}")
         raise
 
     email = info["email"]
     if not email or "@" not in email:
-        db.release_lonely_web_card(card_code, status="failed", note="查单未返回邮箱地址")
+        # _lookup_after_redeem 已经做过重试；此时卡确实已兑换，但还没有
+        # 进入注册阶段，状态保持 used，失败状态由注册结果统一落库。
+        db.release_lonely_web_card(card_code, status="used", note="兑换成功但查单未返回邮箱地址")
         raise LonelyWebError(f"孤独哥网页版查单未返回邮箱地址: {card_code}")
 
     account = LonelyWebAccount(

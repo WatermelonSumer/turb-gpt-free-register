@@ -57,7 +57,7 @@ class RedeemTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "2001")
         self.assertEqual(len(calls), 1)
 
-    def test_transient_error_retries_five_times(self):
+    def test_transient_error_retries_three_times(self):
         calls = []
 
         def fake(*a, **k):
@@ -67,8 +67,8 @@ class RedeemTest(unittest.TestCase):
         with patch.object(web, "_request", fake), patch.object(web.time, "sleep", lambda *_: None):
             with self.assertRaises(web.LonelyWebError):
                 web.redeem_card("MAIL-X")
-        self.assertEqual(web.REDEEM_RETRY_TIMES, 5)
-        self.assertEqual(len(calls), 5)
+        self.assertEqual(web.REDEEM_RETRY_TIMES, 3)
+        self.assertEqual(len(calls), 3)
 
 
 class LookupTest(unittest.TestCase):
@@ -199,6 +199,59 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(card["status"], "available")
         self.assertIn("兑换失败", card["note"])
         self.assertEqual(len(db.list_lonely_web_email_pool()), 0)
+
+    def test_redeem_success_waits_for_eventual_consistency_before_registration(self):
+        """redeem 成功后短暂返回 2005/空邮箱时，仍应等到邮箱可用再交给注册流程。"""
+        db.import_lonely_web_cards([{"card_code": "MAIL-EVENTUAL"}])
+        lookup_calls = []
+
+        def fake(method, path, *, params=None, body=None, base_url=None, timeout=None):
+            if path.endswith("/redeem"):
+                return "0", {"type": "email"}
+            if path.endswith("/order/lookup"):
+                lookup_calls.append(1)
+                if len(lookup_calls) < 3:
+                    return "2005", {"_msg": "卡密尚未兑换"}
+                return _lookup_ok(email="eventual@gmail.com")
+            raise AssertionError(f"未预期调用 {method} {path}")
+
+        with patch.object(web, "_request", fake), patch.object(web.time, "sleep", lambda *_: None):
+            account = web.pick_account()
+
+        self.assertEqual(account.email, "eventual@gmail.com")
+        self.assertEqual(len(lookup_calls), 3)
+        self.assertEqual(db.get_lonely_web_card("MAIL-EVENTUAL")["status"], "used")
+
+    def test_lookup_failure_after_redeem_keeps_card_used_until_registration_result(self):
+        db.import_lonely_web_cards([{"card_code": "MAIL-PENDING"}])
+
+        def fake(method, path, *, params=None, body=None, base_url=None, timeout=None):
+            if path.endswith("/redeem"):
+                return "0", {"type": "email"}
+            if path.endswith("/order/lookup"):
+                return "2005", {"_msg": "卡密尚未兑换"}
+            raise AssertionError(f"未预期调用 {method} {path}")
+
+        with patch.object(web, "_request", fake), patch.object(web.time, "sleep", lambda *_: None):
+            with self.assertRaises(web.LonelyWebError):
+                web.pick_account()
+        card = db.get_lonely_web_card("MAIL-PENDING")
+        self.assertEqual(card["status"], "used")
+        self.assertIn("兑换成功", card["note"])
+
+    def test_registration_failure_marks_email_and_card_failed(self):
+        db.import_lonely_web_cards([{"card_code": "MAIL-REG-FAIL"}])
+        with patch.object(web, "_request", self._fake()):
+            web.pick_account()
+
+        db.release_lonely_web_redeemed_email(
+            "demo@gmail.com", status="failed", note="注册接口报错"
+        )
+        email_row = db.get_lonely_web_redeemed_email("demo@gmail.com")
+        card = db.get_lonely_web_card("MAIL-REG-FAIL")
+        self.assertEqual(email_row["status"], "failed")
+        self.assertEqual(card["status"], "failed")
+        self.assertEqual(card["note"], "注册接口报错")
 
     def test_summary_available_is_unredeemed_card_count(self):
         db.import_lonely_web_cards([{"card_code": "A"}, {"card_code": "B"}, {"card_code": "C"}])

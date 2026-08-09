@@ -2513,17 +2513,34 @@ def get_lonely_web_redeemed_email(email: str) -> dict | None:
 
 
 def release_lonely_web_redeemed_email(email: str, status: str = "available", note: str | None = None) -> None:
-    """卡已消耗，邮箱不能重新分配，available 统一落 failed。"""
+    """更新网页 CDK 兑换邮箱状态，并同步对应卡的最终状态。
+
+    网页版是一卡一邮箱：兑换成功后卡不能回到 available。传入 available
+    是调度层的兼容写法，实际会落为 failed；注册失败时同时把卡标为 failed，
+    这样卡片面板和邮箱池不会出现一个显示 used、另一个显示 failed 的分裂状态。
+    """
     with _LOCK:
         rows = _load_lonely_web_emails()
         row = _find_by_email(rows, email)
         if row is None:
             return
-        row["status"] = "failed" if status == "available" else status
+        final_status = "failed" if status == "available" else status
+        row["status"] = final_status
         row["used_at"] = row.get("used_at") or _now()
         if note is not None:
             row["note"] = note
         _save_lonely_web_emails(rows)
+
+        # 只有明确的失败/停用结果才改变卡状态；成功注册不会调用这个函数，
+        # 因此正常兑换后的卡仍保持 used。
+        if final_status in ("failed", "disabled"):
+            cards = _load_lonely_web_cards()
+            card = _find_lonely_card(cards, row.get("card_code") or "")
+            if card is not None:
+                card["status"] = final_status
+                if note is not None:
+                    card["note"] = note
+                _save_lonely_web_cards(cards)
 
 
 def delete_lonely_web_redeemed_email(email: str) -> bool:
