@@ -105,11 +105,31 @@ def _generic_api_email_line(row: dict) -> str:
     ])
 
 
+def _account_registration_password(row: dict) -> str:
+    direct = row.get("registration_password")
+    if direct is not None:
+        return str(direct)
+
+    extra = row.get("extra_json")
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return ""
+    if not isinstance(extra, dict):
+        return ""
+    password = extra.get("registration_password")
+    return "" if password is None else str(password)
+
+
 def _account_line(row: dict) -> str:
-    base = row.get("original_email_line") or row.get("email") or ""
-    token = row.get("access_token") or ""
-    totp = row.get("totp_secret") or ""
-    return f"{base}----{token}----{totp}" if totp else f"{base}----{token}"
+    # Account exports use the stable account/password/TOTP/access-token order.
+    return "----".join([
+        row.get("email") or "",
+        _account_registration_password(row),
+        row.get("totp_secret") or "",
+        row.get("access_token") or "",
+    ])
 
 
 def _registered_email_line(row: dict) -> str:
@@ -317,7 +337,7 @@ def _render_static_viewer(outlook_rows: list[dict] | None = None, account_rows: 
   <section>
     <div class="head">
       <h2>已完成账号</h2>
-      <p>整行格式：邮箱----密码----clientId----邮箱刷新令牌----accessToken----totpSecret（如有）</p>
+      <p>账号整行格式：账号----密码----TOTP----at（第四列为 access token，缺少值时保留空列）</p>
     </div>
     <div class="table-wrap">
       <table>

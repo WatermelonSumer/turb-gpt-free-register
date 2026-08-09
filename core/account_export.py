@@ -36,9 +36,19 @@ def _account_material_line(email: str, row: dict | None = None) -> str:
     return email
 
 
-def _account_copy_line(material_line: str, access_token: str, totp_secret: str | None = None) -> str:
-    """生成包含 token 的整行归档，方便从批次汇总文件里复制。"""
-    return f"{material_line}----{access_token}----{totp_secret}" if totp_secret else f"{material_line}----{access_token}"
+def _account_copy_line(
+    account: str,
+    access_token: str,
+    totp_secret: str | None = None,
+    registration_password: str | None = None,
+) -> str:
+    """生成账号、注册密码、TOTP、access token 四列的整行归档。"""
+    return "----".join([
+        account or "",
+        "" if registration_password is None else str(registration_password),
+        totp_secret or "",
+        access_token or "",
+    ])
 
 
 def create_batch_archive_dir(count: int, workers: int = 1) -> Path:
@@ -81,7 +91,15 @@ def _append_batch_archive(
     row = db.get_account(row_id) or {}
     folder.mkdir(parents=True, exist_ok=True)
     material_line = _account_material_line(email, row)
-    copy_line = _account_copy_line(material_line, access_token, totp_secret)
+    registration_password = extra.get("registration_password")
+    if registration_password is None:
+        registration_password = db._account_registration_password(row)
+    copy_line = _account_copy_line(
+        email,
+        access_token,
+        totp_secret,
+        registration_password,
+    )
     archive = {
         "id": row_id,
         "email": email,

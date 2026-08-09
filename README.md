@@ -568,6 +568,9 @@ REGISTER_PASSWORD = "你的固定密码"
 
 - 账号 `extra_json.registration_password`
 - 批次归档 `accounts/YYYYMMDD-.../注册成功账号.json` 的 `extra.registration_password`
+- WebUI“复制整行/下载 TXT”和批次 `注册成功整行.txt`
+
+整行格式固定为：`账号----密码----TOTP----at`（第四列为 access token；缺少密码或 TOTP 时保留空列）。
 
 注意：账号表里的 `password` 字段仍用于 Outlook 邮箱素材密码，不会被 OpenAI 注册密码覆盖。
 
