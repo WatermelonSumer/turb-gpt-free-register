@@ -317,7 +317,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail,lonely,lonely_web",
+        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底；两段式取件邮箱导入后可直接填取件地址域名，例如 mail.ai1998.xyz",
     },
     {
         "key": "LONELY_MAIL_BASE_URL", "file": "email.py", "type": "str", "group": "邮箱 / OTP",

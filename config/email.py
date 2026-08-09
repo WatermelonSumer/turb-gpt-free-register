@@ -18,7 +18,8 @@ USE_EMAIL_SERVICE = False
 #   "outlook"           — 外购 Outlook 账号池 + mail.chatai.codes 远端取信
 #   "cloudflare_domain" — Cloudflare 域名邮箱（转发到 QQ 邮箱），通过 IMAP 取信
 #   "cloudflare" — Cloudflare Worker 临时邮箱（cloudflare_temp_email），API 创建并取码
-#   "generic_api"       — 通用 API 取码邮箱池（邮箱----取码地址）
+#   "generic_api"       — 通用 API 取码邮箱池（邮箱----取件地址）；导入后也可直接使用取件地址域名作为来源名
+#                          （例如 https://mail.example.com/... 会生成来源 mail.example.com）
 #   "gptmail"           — GPTMail 临时邮箱 API（运行时随机生成邮箱并自动收码）
 #   "mailnest"          — MailNest/迈巢临时邮箱 API（运行时购买邮箱并自动收码）
 #   "cloudmail"         — CloudMail/Cloud Mail API（自动从平台获取域名并随机生成邮箱）

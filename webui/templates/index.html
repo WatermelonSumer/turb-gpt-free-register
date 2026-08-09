@@ -2871,7 +2871,7 @@
     <div class="outlook-import-head">
       <div class="outlook-import-head-main">
         <h3 id="outlookImportTitle">导入邮箱素材</h3>
-        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取码地址（---- 或 ==== 均可）；孤独哥：每行一个 CDK 卡密，邮箱在注册时兑换。默认按「已注册成功账号」导入，方便在账号页补跑 Codex。</p>
+        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取件地址（---- 或 ==== 均可）；孤独哥：每行一个 CDK 卡密，邮箱在注册时兑换。两段式邮箱会自动按取件地址域名归类。</p>
       </div>
       <button type="button" class="outlook-import-close" id="btnCloseOutlookImport" aria-label="关闭">×</button>
     </div>
@@ -2897,7 +2897,7 @@
       </label>
       <label class="outlook-import-field">
         <span>邮箱素材</span>
-        <textarea id="importTextV2" placeholder="Outlook: email----password----clientId----refreshToken&#10;通用API: email----取码地址"></textarea>
+        <textarea id="importTextV2" placeholder="Outlook: email----password----clientId----refreshToken&#10;通用API: email----取件地址"></textarea>
       </label>
     </div>
     <div class="outlook-import-foot">
@@ -3176,6 +3176,57 @@ const REG_SOURCE_LABELS = {
   cloudmail: 'CloudMail（临时邮箱）',
   cloudflare: 'Cloudflare（临时邮箱）',
 };
+function isPickupDomainSource(value) {
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(String(value || '').trim());
+}
+function syncDynamicPickupSourceMenus(summary) {
+  const sources = [...(summary?.generic_api_sources || []), ...(summary?.configured_sources || [])]
+    .map(item => typeof item === 'string' ? item : item?.source)
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(value => isPickupDomainSource(value));
+  const uniqueSources = [...new Set(sources)].sort();
+
+  const addToMenu = (wrapId, handler) => {
+    const wrap = document.getElementById(wrapId);
+    const menu = wrap?.querySelector('.outlook-v2-select-menu');
+    if (!menu) return;
+    const currentItems = [...menu.querySelectorAll('[data-dynamic-pickup-source="1"]')];
+    const currentSources = currentItems.map(item => item.dataset.value || '');
+    if (currentSources.length === uniqueSources.length && currentSources.every((source, index) => source === uniqueSources[index])) {
+      return;
+    }
+    currentItems.forEach(item => item.remove());
+    uniqueSources.forEach(source => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'outlook-v2-select-item';
+      item.dataset.value = source;
+      item.dataset.dynamicPickupSource = '1';
+      item.setAttribute('role', 'option');
+      item.textContent = source;
+      item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handler(source, wrap, item);
+      });
+      menu.appendChild(item);
+    });
+  };
+
+  addToMenu('regSourceV2Wrap', (source, wrap) => {
+    setRegSourceV2(source);
+    wrap.classList.remove('open');
+    const button = wrap.querySelector('.outlook-v2-select-btn');
+    if (button) button.setAttribute('aria-expanded', 'false');
+  });
+  addToMenu('poolSourceV2Wrap', (source, wrap) => {
+    setPoolSourceV2(source);
+    wrap.classList.remove('open');
+    const button = wrap.querySelector('.outlook-v2-select-btn');
+    if (button) button.setAttribute('aria-expanded', 'false');
+    const hidden = document.getElementById('poolSourceV2');
+    if (hidden) onPoolSourceChange(hidden);
+  });
+}
 function getRegSource() {
   const el = document.getElementById('regSourceV2');
   return el ? String(el.value || '').trim() : '';
@@ -3185,9 +3236,10 @@ function setRegSourceV2(val) {
   const btn = document.getElementById('regSourceV2Btn');
   const wrap = document.getElementById('regSourceV2Wrap');
   if (!hidden) return;
-  const next = (val in REG_SOURCE_LABELS) ? val : '';
+  const candidate = String(val || '').trim().toLowerCase();
+  const next = (candidate in REG_SOURCE_LABELS || isPickupDomainSource(candidate)) ? candidate : '';
   hidden.value = next;
-  if (btn) btn.textContent = REG_SOURCE_LABELS[next];
+  if (btn) btn.textContent = REG_SOURCE_LABELS[next] || next;
   if (wrap) {
     wrap.querySelectorAll('.outlook-v2-select-item').forEach(item => {
       item.classList.toggle('is-active', (item.dataset.value || '') === next);
@@ -3200,6 +3252,7 @@ function setRegSourceV2(val) {
 let LAST_SUMMARY = null;
 function applySummary(s) {
   LAST_SUMMARY = s;
+  syncDynamicPickupSourceMenus(s);
   $('#statAccounts').textContent = s.accounts;
 
   // 「可用/总数」跟着注册页下拉走：选了具体来源就显示那个池的数字，
@@ -5011,7 +5064,8 @@ function setPoolSourceV2(val) {
   const btn = document.getElementById('poolSourceV2Btn');
   const wrap = document.getElementById('poolSourceV2Wrap');
   if (!hidden) return;
-  const next = POOL_SOURCE_LABELS[val] ? val : 'all';
+  const candidate = String(val || '').trim().toLowerCase();
+  const next = (POOL_SOURCE_LABELS[candidate] || isPickupDomainSource(candidate)) ? candidate : 'all';
   hidden.value = next;
   if (btn) btn.textContent = POOL_SOURCE_LABELS[next] || next;
   if (wrap) {
@@ -5246,6 +5300,7 @@ function onPoolSourceChange(el) {
   OUTLOOK_SELECTED.clear();
   const val = el ? el.value : getPoolSource();
   if (val === 'outlook' || val === 'generic_api') setImportSourceV2(val);
+  else if (isPickupDomainSource(val)) setImportSourceV2('generic_api');
   loadOutlook();
 }
 function syncOutlookSelectAll(checked) {
@@ -5399,7 +5454,7 @@ const IMPORT_SOURCE_LABELS = {
 };
 const IMPORT_PLACEHOLDERS = {
   outlook: 'email----password----clientId----refreshToken',
-  generic_api: 'email----取码地址',
+  generic_api: 'email----取件地址',
   lonely: 'MAIL-XXXX-XXXX-XXXX\nMAIL-YYYY-YYYY-YYYY',
   lonely_web: 'MAIL-XXXX-XXXX-XXXX\nMAIL-YYYY-YYYY-YYYY',
 };
@@ -5425,6 +5480,8 @@ function setImportSourceV2(val) {
   const isCdk = CDK_IMPORT_SOURCES.includes(next);
   if (regWrap) regWrap.style.display = isCdk ? 'none' : '';
   if (regEl && isCdk) regEl.checked = false;
+  if (regEl && next === 'generic_api') regEl.checked = false;
+  if (regEl && next === 'outlook') regEl.checked = true;
 }
 function openOutlookImportModal() {
   const modal = $('#outlookImportModal');
@@ -5433,6 +5490,7 @@ function openOutlookImportModal() {
   if (result) result.innerHTML = '';
   const pool = getPoolSource();
   if (pool === 'outlook' || pool === 'generic_api' || pool === 'lonely' || pool === 'lonely_web') setImportSourceV2(pool);
+  else if (isPickupDomainSource(pool)) setImportSourceV2('generic_api');
   else setImportSourceV2('outlook');
   modal.classList.remove('hidden');
   updateModalScrollLock();
@@ -5511,7 +5569,8 @@ async function doImportOutlook() {
     const msg = `按 ${mode} 导入：解析 ${r.parsed} ${isCdk ? '个卡密' : '行'}，新增 ${r.inserted}，跳过 ${r.skipped}${tail}`;
     if (resultEl) resultEl.innerHTML = `<div class="banner info">${esc(msg)}</div>`;
     if (textEl) textEl.value = '';
-    setPoolSourceV2(source);
+    const importedSource = Array.isArray(r.sources) && r.sources.length === 1 ? r.sources[0] : source;
+    setPoolSourceV2(importedSource);
     setImportSourceV2(source);
     loadOutlook(); loadAccounts(); loadSummary();
     showToast(`导入完成：新增 ${r.inserted}，跳过 ${r.skipped}`);

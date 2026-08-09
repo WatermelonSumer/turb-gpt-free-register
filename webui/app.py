@@ -22,22 +22,38 @@ from core import codex_retry_service, db, plan_check_service, extract_link_servi
 from webui.auth import init_auth, register_auth_routes
 from core import registration_service as svc
 from webui import config_editor
+from core.pickup_source import GENERIC_API_SOURCE, is_dynamic_source, source_for_pickup_url
 
 logger = logging.getLogger(__name__)
+
+
+def _is_generic_pool_source(source: str | None) -> bool:
+    value = str(source or "").strip().lower().rstrip(".")
+    return value == GENERIC_API_SOURCE or is_dynamic_source(value)
+
+
+def _is_pool_source(source: str | None, *, include_all: bool = True) -> bool:
+    value = str(source or "").strip().lower().rstrip(".")
+    static = {"outlook", GENERIC_API_SOURCE, "cloudflare_domain", "lonely", "lonely_web"}
+    if include_all:
+        static.add("all")
+    return value in static or is_dynamic_source(value)
 
 def _pool_source_arg(default: str = "outlook") -> str:
     src = (request.args.get("source") or "").strip()
     if not src and request.method == "POST":
         data = request.get_json(silent=True) or {}
         src = (data.get("source") or data.get("type") or "").strip()
-    return src if src in ("all", "outlook", "generic_api", "cloudflare_domain", "lonely", "lonely_web") else default
+    src = src.lower().rstrip(".")
+    return src if _is_pool_source(src) else default
 
 
 def _with_pool_source(rows: list[dict], source: str) -> list[dict]:
     out = []
     for r in rows:
         x = dict(r)
-        x["source"] = source
+        if source != GENERIC_API_SOURCE or not x.get("source"):
+            x["source"] = source
         if not x.get("copy_line"):
             x["copy_line"] = x.get("email") or ""
         out.append(x)
@@ -254,9 +270,20 @@ def create_app(auth_code: str | None = None) -> Flask:
         # 每个本地池单独算一份，前端按注册页选的来源取对应数字。
         # 只统计配置里点名的来源会导致：导入了 CDK 但配置还是 outlook 时，
         # 「可用」显示 0，看着像没导进去。
+        configured = parse_email_sources(_email_cfg.EMAIL_SOURCE)
+        generic_sources = db.generic_api_source_summaries()
+        # Keep a configured domain visible even before its first record is
+        # imported, so the source selector remains stable across restarts.
+        for configured_source in configured:
+            if is_dynamic_source(configured_source):
+                generic_sources.setdefault(
+                    configured_source,
+                    {"total": 0, "available": 0, "used": 0, "failed": 0},
+                )
+        generic_sources = dict(sorted(generic_sources.items()))
         per_source = {
             "outlook": db.outlook_pool_summary(),
-            "generic_api": db.generic_api_email_pool_summary(),
+            **generic_sources,
             "cloudflare_domain": db.domain_email_pool_summary(),
             "lonely": db.lonely_email_pool_summary(),
             "lonely_web": db.lonely_web_email_pool_summary(),
@@ -276,7 +303,6 @@ def create_app(auth_code: str | None = None) -> Flask:
                     out[k] += int(one.get(k, 0) or 0)
             return out
 
-        configured = parse_email_sources(_email_cfg.EMAIL_SOURCE)
         pool = _sum_of(configured)
         domain_pool = per_source["cloudflare_domain"]
         return jsonify({
@@ -293,6 +319,11 @@ def create_app(auth_code: str | None = None) -> Flask:
             # 新增：注册页下拉按来源取数用
             "configured_sources": configured,
             "per_source": per_source,
+            "generic_api_sources": [
+                {"source": source, **summary}
+                for source, summary in generic_sources.items()
+                if source != GENERIC_API_SOURCE
+            ],
         })
 
     # ----------------------------------------------------------
@@ -1310,13 +1341,20 @@ def create_app(auth_code: str | None = None) -> Flask:
         if source == "all":
             rows = []
             rows += _with_pool_source(db.list_outlook_pool(status=status, limit=fetch_limit), "outlook")
-            rows += _with_pool_source(db.list_generic_api_email_pool(status=status, limit=fetch_limit), "generic_api")
+            rows += _with_pool_source(db.list_generic_api_email_pool(status=status, limit=fetch_limit), GENERIC_API_SOURCE)
             rows += _with_pool_source(db.list_domain_email_pool(status=status, limit=fetch_limit), "cloudflare_domain")
             rows += _with_pool_source(db.list_lonely_email_pool(status=status, limit=fetch_limit), "lonely")
             rows += _with_pool_source(db.list_lonely_web_email_pool(status=status, limit=fetch_limit), "lonely_web")
             rows = sorted(rows, key=lambda x: str(x.get("created_at") or x.get("imported_at") or x.get("used_at") or ""), reverse=True)
-        elif source == "generic_api":
-            rows = _with_pool_source(db.list_generic_api_email_pool(status=status, limit=fetch_limit), "generic_api")
+        elif _is_generic_pool_source(source):
+            rows = _with_pool_source(
+                db.list_generic_api_email_pool(
+                    status=status,
+                    limit=fetch_limit,
+                    source=None if source == GENERIC_API_SOURCE else source,
+                ),
+                source,
+            )
         elif source == "lonely":
             # 孤独哥展示的是「已兑换出来的邮箱」，CDK 本身走 /api/lonely/cards
             rows = _with_pool_source(db.list_lonely_email_pool(status=status, limit=fetch_limit), "lonely")
@@ -1343,8 +1381,9 @@ def create_app(auth_code: str | None = None) -> Flask:
         分隔符兼容 ---- 与 ====。
         """
         data = request.get_json(silent=True) or {}
-        source = (data.get("source") or data.get("type") or "").strip()
-        if source not in ("outlook", "generic_api", "lonely", "lonely_web"):
+        source = (data.get("source") or data.get("type") or "").strip().lower().rstrip(".")
+        is_pickup_import = source in (GENERIC_API_SOURCE, "pickup_domain", "auto") or is_dynamic_source(source)
+        if source not in ("outlook", "lonely", "lonely_web") and not is_pickup_import:
             return jsonify({"ok": False, "error": "导入时请选择具体类型：Outlook / 通用 API / 孤独哥 CDK / 孤独哥 CDK 网页版"}), 400
         text = data.get("text") or ""
         as_registered = bool(data.get("as_registered", False))
@@ -1383,7 +1422,7 @@ def create_app(auth_code: str | None = None) -> Flask:
                 continue
             parts = line.split("----") if "----" in line else line.split("====")
             parts = [p.strip() for p in parts]
-            if source == "generic_api":
+            if is_pickup_import:
                 if len(parts) < 2:
                     continue
                 records.append({
@@ -1404,20 +1443,27 @@ def create_app(auth_code: str | None = None) -> Flask:
                 "totp_secret": parts[5] if len(parts) > 5 else "",
             })
         if not records:
-            need = "2 段：邮箱----取码地址" if source == "generic_api" else "4 段：email----password----clientId----refreshToken"
+            need = "2 段：邮箱----取件地址" if is_pickup_import else "4 段：email----password----clientId----refreshToken"
             return jsonify({"ok": False, "error": f"未解析到有效邮箱行（需 {need}，---- 或 ==== 分隔）"}), 400
+        registered_source = GENERIC_API_SOURCE if source in ("pickup_domain", "auto") else source
         if as_registered:
-            inserted, skipped = db.import_registered_email_accounts(records, source=source)
-        elif source == "generic_api":
-            inserted, skipped = db.import_generic_api_emails(records)
+            inserted, skipped = db.import_registered_email_accounts(records, source=registered_source)
+        elif is_pickup_import:
+            inserted, skipped = db.import_generic_api_emails(records, source=registered_source)
         else:
             inserted, skipped = db.import_outlook_accounts(records)
+        imported_sources = sorted({
+            source_for_pickup_url(record.get("code_url") or record.get("url"))
+            for record in records
+            if is_pickup_import and str(record.get("code_url") or record.get("url") or "").strip()
+        })
         return jsonify({
             "ok": True,
             "inserted": inserted,
             "skipped": skipped,
             "parsed": len(records),
             "as_registered": as_registered,
+            "sources": imported_sources,
         })
 
     @app.get("/api/lonely/cards")
@@ -1582,11 +1628,11 @@ def create_app(auth_code: str | None = None) -> Flask:
         status = (data.get("status") or "").strip()
         if not email or status not in ("available", "used", "failed", "disabled"):
             return jsonify({"ok": False, "error": "email 或 status 非法"}), 400
-        source = (data.get("source") or _pool_source_arg()).strip()
+        source = (data.get("source") or _pool_source_arg()).strip().lower().rstrip(".")
         if source == "all":
             source = "outlook"
-        if source == "generic_api":
-            db.release_generic_api_email(email, status=status, note=data.get("note"))
+        if _is_generic_pool_source(source):
+            db.release_generic_api_email(email, status=status, note=data.get("note"), source=source)
         elif source == "cloudflare_domain":
             db.release_domain_email(email, status=status, note=data.get("note"))
         elif source == "lonely":
@@ -1604,7 +1650,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         items = data.get("items") or data.get("emails") or []
         status = (data.get("status") or "").strip()
         note = data.get("note")
-        default_source = (data.get("source") or _pool_source_arg()).strip()
+        default_source = (data.get("source") or _pool_source_arg()).strip().lower().rstrip(".")
         if status not in ("available", "used", "failed", "disabled"):
             return jsonify({"ok": False, "error": "status 非法"}), 400
         if not isinstance(items, list) or not items:
@@ -1618,7 +1664,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         for raw_item in items:
             if isinstance(raw_item, dict):
                 email = (str(raw_item.get("email") or "")).strip()
-                item_source = (raw_item.get("source") or default_source or "outlook").strip()
+                item_source = (raw_item.get("source") or default_source or "outlook").strip().lower().rstrip(".")
             else:
                 email = (str(raw_item or "")).strip()
                 item_source = default_source
@@ -1632,8 +1678,8 @@ def create_app(auth_code: str | None = None) -> Flask:
                 continue
             seen.add(key)
             try:
-                if item_source == "generic_api":
-                    db.release_generic_api_email(email, status=status, note=note)
+                if _is_generic_pool_source(item_source):
+                    db.release_generic_api_email(email, status=status, note=note, source=item_source)
                 elif item_source == "cloudflare_domain":
                     db.release_domain_email(email, status=status, note=note)
                 elif item_source == "lonely":
@@ -1659,12 +1705,12 @@ def create_app(auth_code: str | None = None) -> Flask:
         email = (data.get("email") or "").strip()
         if not email:
             return jsonify({"ok": False, "error": "email 为空"}), 400
-        source = (data.get("source") or _pool_source_arg()).strip()
+        source = (data.get("source") or _pool_source_arg()).strip().lower().rstrip(".")
         if source == "all":
             source = "outlook"
         deleted = (
-            db.delete_generic_api_email(email)
-            if source == "generic_api"
+            db.delete_generic_api_email(email, source=source)
+            if _is_generic_pool_source(source)
             else db.delete_domain_email(email)
             if source == "cloudflare_domain"
             else db.delete_lonely_redeemed_email(email)
@@ -1692,7 +1738,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         for raw_item in emails:
             if isinstance(raw_item, dict):
                 email = (str(raw_item.get("email") or "")).strip()
-                item_source = (raw_item.get("source") or source or "outlook").strip()
+                item_source = (raw_item.get("source") or source or "outlook").strip().lower().rstrip(".")
             else:
                 email = (str(raw_item or "")).strip()
                 item_source = source
@@ -1706,8 +1752,8 @@ def create_app(auth_code: str | None = None) -> Flask:
                 continue
             seen.add(key)
             deleted_ok = (
-                db.delete_generic_api_email(email)
-                if item_source == "generic_api"
+                db.delete_generic_api_email(email, source=item_source)
+                if _is_generic_pool_source(item_source)
                 else db.delete_domain_email(email)
                 if item_source == "cloudflare_domain"
                 else db.delete_lonely_redeemed_email(email)
@@ -2333,14 +2379,14 @@ def create_app(auth_code: str | None = None) -> Flask:
                 "workers": workers,
             })
         # 注册页下拉选的来源优先；没选就用配置。后面的必填校验和容量提示都基于它。
-        requested_source = str(data.get("source") or "").strip()
+        requested_source = str(data.get("source") or "").strip().lower().rstrip(".")
         if requested_source:
             # parse_email_sources 解析不出来时会兜底成 ["outlook"]，所以这里先显式校验：
             # 传错来源必须报错，不能静默跑到别的池子上。
-            from core.email_provider import _VALID_SOURCES
+            from core.email_provider import is_valid_email_source
             bad = [
                 s for s in (x.strip() for x in requested_source.replace(";", ",").replace("|", ",").split(","))
-                if s and s not in _VALID_SOURCES
+                if s and not is_valid_email_source(s)
             ]
             if bad:
                 return jsonify({"ok": False, "error": f"未知邮箱来源: {', '.join(bad)}"}), 400
@@ -2406,8 +2452,11 @@ def create_app(auth_code: str | None = None) -> Flask:
             warning = ""
             if sources == ["cloudflare_domain"] and pool.get("available", 0) < count:
                 warning = f"域名邮箱池仅 {pool.get('available', 0)} 个可用，少于任务数 {count}，不足的会自动生成"
-        elif sources == ["generic_api"]:
-            pool = db.generic_api_email_pool_summary()
+        elif len(sources) == 1 and _is_generic_pool_source(sources[0]):
+            pickup_source = sources[0]
+            pool = db.generic_api_email_pool_summary(
+                source=None if pickup_source == GENERIC_API_SOURCE else pickup_source
+            )
             warning = ""
             if pool.get("available", 0) < count:
                 warning = f"通用 API 邮箱池仅 {pool.get('available', 0)} 个可用，少于任务数 {count}，不足的会失败"
@@ -2426,8 +2475,11 @@ def create_app(auth_code: str | None = None) -> Flask:
             available = 0
             if "outlook" in sources:
                 available += db.outlook_pool_summary().get("available", 0)
-            if "generic_api" in sources:
+            if GENERIC_API_SOURCE in sources:
                 available += db.generic_api_email_pool_summary().get("available", 0)
+            else:
+                for pickup_source in (source for source in sources if is_dynamic_source(source)):
+                    available += db.generic_api_email_pool_summary(source=pickup_source).get("available", 0)
             if "lonely" in sources:
                 available += db.lonely_email_pool_summary().get("available", 0)
             if "lonely_web" in sources:

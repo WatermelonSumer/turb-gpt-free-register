@@ -23,6 +23,7 @@ import requests
 
 from config import email as _email_cfg
 from core.otp_utils import extract_otp
+from core.pickup_source import GENERIC_API_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class GenericApiMailError(RuntimeError):
 class GenericApiEmailAccount:
     email: str
     code_url: str
+    source: str = GENERIC_API_SOURCE
 
 
 def _flatten_json(obj) -> str:
@@ -479,7 +481,7 @@ def _fetch_inline_messages_page_otp(
     return None
 
 
-def pick_account() -> GenericApiEmailAccount:
+def pick_account(source: str | None = None) -> GenericApiEmailAccount:
     """领取一个可用通用 API 邮箱。"""
     from core.db import claim_next_generic_api_email, generic_api_email_pool_summary
 
@@ -487,13 +489,19 @@ def pick_account() -> GenericApiEmailAccount:
     if inserted:
         logger.info(f"[GenericAPI] 已自动从 {_ACCOUNTS_FILE.name} 导入 {inserted} 个邮箱（跳过 {skipped} 个）")
 
-    row = claim_next_generic_api_email()
+    row = claim_next_generic_api_email(source=source)
     if row is None:
-        summary = generic_api_email_pool_summary()
+        summary = generic_api_email_pool_summary(
+            source=None if source in (None, "", GENERIC_API_SOURCE) else source
+        )
         raise GenericApiMailError(
             f"通用 API 邮箱池没有可用账号: {summary}. 请在 WebUI 邮箱池导入：邮箱----取码地址"
         )
-    account = GenericApiEmailAccount(email=row["email"], code_url=row["code_url"])
+    account = GenericApiEmailAccount(
+        email=row["email"],
+        code_url=row["code_url"],
+        source=str(row.get("source") or source or GENERIC_API_SOURCE),
+    )
     _CONTEXT_CACHE[account.email] = account
     logger.info(f"[GenericAPI] 选中邮箱: {account.email}（DB id={row.get('id')}）")
     return account
@@ -517,7 +525,7 @@ def import_from_file(path: str | Path | None = None) -> tuple[int, int]:
         if len(parts) < 2:
             continue
         records.append({"email": parts[0], "code_url": parts[1]})
-    return import_generic_api_emails(records)
+    return import_generic_api_emails(records, source="auto")
 
 
 def get_account_context(email: str) -> GenericApiEmailAccount | None:
@@ -527,7 +535,11 @@ def get_account_context(email: str) -> GenericApiEmailAccount | None:
     row = get_generic_api_email_by_email(email)
     if row is None:
         return None
-    account = GenericApiEmailAccount(email=row["email"], code_url=row["code_url"])
+    account = GenericApiEmailAccount(
+        email=row["email"],
+        code_url=row["code_url"],
+        source=str(row.get("source") or GENERIC_API_SOURCE),
+    )
     _CONTEXT_CACHE[email] = account
     return account
 

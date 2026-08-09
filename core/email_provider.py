@@ -16,9 +16,17 @@ EMAIL_SOURCE 支持单个或多个来源：
 import logging
 from typing import Iterable
 
+from core.pickup_source import GENERIC_API_SOURCE, is_dynamic_source
+
 logger = logging.getLogger(__name__)
 
 _VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail", "lonely", "lonely_web")
+
+
+def is_valid_email_source(source: str | None) -> bool:
+    """Accept built-in sources and domain-shaped pickup sources."""
+    value = str(source or "").strip().lower()
+    return value in _VALID_SOURCES or is_dynamic_source(value)
 
 
 def parse_email_sources(value=None) -> list[str]:
@@ -35,12 +43,14 @@ def parse_email_sources(value=None) -> list[str]:
 
     out: list[str] = []
     for item in raw:
-        s = str(item or "").strip().strip('"\'')
+        s = str(item or "").strip().strip('"\'').lower()
         if not s:
             continue
-        if s not in _VALID_SOURCES:
+        if not is_valid_email_source(s):
             logger.warning(f"[EmailProvider] 未知邮箱来源 {s!r}，已忽略")
             continue
+        if is_dynamic_source(s):
+            s = s.rstrip(".")
         if s not in out:
             out.append(s)
     return out or ["outlook"]
@@ -56,9 +66,9 @@ def _pick_from_source(source: str) -> str:
     if source == "cloudflare_domain":
         from core.qqmail_client import pick_domain_email
         return pick_domain_email()
-    if source == "generic_api":
+    if source == GENERIC_API_SOURCE or is_dynamic_source(source):
         from core.generic_api_mail_client import pick_account
-        return pick_account().email
+        return pick_account(source=None if source == GENERIC_API_SOURCE else source).email
     if source == "mailnest":
         from core.mailnest_client import pick_account
         return pick_account().email
@@ -116,8 +126,9 @@ def resolve_email_source(email: str) -> str:
         return "lonely"
     if db.get_lonely_web_redeemed_email(email):
         return "lonely_web"
-    if db.get_generic_api_email_by_email(email):
-        return "generic_api"
+    generic_row = db.get_generic_api_email_by_email(email)
+    if generic_row:
+        return str(generic_row.get("source") or GENERIC_API_SOURCE)
     if db.get_outlook_by_email(email):
         return "outlook"
     if db._find_domain_email(db._load_domain_pool(), email):  # 内部轻量查询，仅本项目使用
@@ -181,7 +192,7 @@ def wait_for_otp(
     if source == "cloudflare_domain":
         from core.qqmail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
-    if source == "generic_api":
+    if source == GENERIC_API_SOURCE or is_dynamic_source(source):
         from core.generic_api_mail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
     if source == "mailnest":
@@ -212,7 +223,7 @@ def release_email(email: str, status: str = "available", note: str | None = None
     elif source == "cloudflare_domain":
         from core.qqmail_client import release_domain_email
         release_domain_email(email, status=status, note=note)
-    elif source == "generic_api":
+    elif source == GENERIC_API_SOURCE or is_dynamic_source(source):
         from core.generic_api_mail_client import release_account
         release_account(email, status=status, note=note)
     elif source == "mailnest":
@@ -252,8 +263,8 @@ def release_email_if_unconsumed(email: str, note: str | None = None) -> bool:
         changed = True
     elif source == "outlook":
         changed = db.release_unconsumed_outlook(email, note=note)
-    elif source == "generic_api":
-        changed = db.release_unconsumed_generic_api_email(email, note=note)
+    elif source == GENERIC_API_SOURCE or is_dynamic_source(source):
+        changed = db.release_unconsumed_generic_api_email(email, note=note, source=source)
     elif source == "cloudflare_domain":
         changed = db.release_unconsumed_domain_email(email, note=note)
     else:

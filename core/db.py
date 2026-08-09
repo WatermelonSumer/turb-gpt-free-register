@@ -21,6 +21,8 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from core.pickup_source import GENERIC_API_SOURCE, is_dynamic_source, source_for_pickup_url
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _RUNTIME_DATA_ENV = "TURB_DATA_DIR"
 _runtime_data_value = str(os.getenv(_RUNTIME_DATA_ENV) or "").strip()
@@ -171,6 +173,13 @@ def _generic_api_email_line(row: dict) -> str:
         row.get("email") or "",
         row.get("code_url") or "",
     ])
+
+
+def _generic_api_row_source(row: dict) -> str:
+    """Return the URL-domain source for a two-part pickup record."""
+    explicit = str(row.get("source") or "").strip().lower()
+    fallback = explicit if is_dynamic_source(explicit) else GENERIC_API_SOURCE
+    return source_for_pickup_url(row.get("code_url"), fallback=fallback)
 
 
 def _account_registration_password(row: dict) -> str:
@@ -569,11 +578,17 @@ def _save_outlook(rows: list[dict]) -> None:
 
 def _load_generic_api_emails() -> list[dict]:
     rows = _read_json(_GENERIC_API_EMAIL_JSON, [])
-    return rows if isinstance(rows, list) else []
+    if not isinstance(rows, list):
+        return []
+    out = [row for row in rows if isinstance(row, dict)]
+    for row in out:
+        row["source"] = _generic_api_row_source(row)
+    return out
 
 
 def _save_generic_api_emails(rows: list[dict]) -> None:
     for row in rows:
+        row["source"] = _generic_api_row_source(row)
         row["copy_line"] = _generic_api_email_line(row)
     _write_json(_GENERIC_API_EMAIL_JSON, rows)
     _sync_generic_api_email_txt(rows)
@@ -719,6 +734,7 @@ def _decorate_outlook(row: dict, account_by_email: dict[str, dict] | None = None
 
 def _decorate_generic_api_email(row: dict, account_by_email: dict[str, dict] | None = None) -> dict:
     out = dict(row)
+    out["source"] = _generic_api_row_source(out)
     out["copy_line"] = _generic_api_email_line(out)
     out["password"] = out.get("password") or ""
     out["client_id"] = out.get("client_id") or ""
@@ -1649,7 +1665,7 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
     返回 (新增账号数, 跳过数)。已存在账号会跳过；邮箱池中已存在的素材会复用并标记 used。
     """
     source = (source or "").strip().lower()
-    if source not in ("outlook", "generic_api"):
+    if source != "outlook" and source != GENERIC_API_SOURCE and not is_dynamic_source(source):
         raise ValueError("source 必须显式传入 outlook / generic_api")
 
     with _LOCK:
@@ -1670,8 +1686,9 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
             now = _now()
             original_line = email
             pool_row = None
+            account_source = source
 
-            if source == "generic_api":
+            if source == GENERIC_API_SOURCE or is_dynamic_source(source):
                 code_url = (raw.get("code_url") or raw.get("url") or "").strip()
                 if not code_url:
                     skipped += 1
@@ -1682,6 +1699,7 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
                         "id": _next_id(generic_rows),
                         "email": email,
                         "code_url": code_url,
+                        "source": source_for_pickup_url(code_url, fallback=source),
                         "status": "used",
                         "used_at": now,
                         "note": "导入为已注册账号，用于 Codex 授权",
@@ -1690,12 +1708,14 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
                     generic_rows.append(pool_row)
                 else:
                     pool_row["code_url"] = code_url or pool_row.get("code_url")
+                pool_row["source"] = _generic_api_row_source(pool_row)
                 pool_row["status"] = "used"
                 pool_row["used_at"] = pool_row.get("used_at") or now
                 pool_row["completed_at"] = pool_row.get("completed_at") or now
                 pool_row["note"] = pool_row.get("note") or "导入为已注册账号，用于 Codex 授权"
                 pool_row["copy_line"] = _generic_api_email_line(pool_row)
                 original_line = _generic_api_email_line(pool_row)
+                account_source = pool_row["source"]
             else:
                 password = (raw.get("password") or "").strip()
                 client_id = (raw.get("client_id") or raw.get("clientId") or "").strip()
@@ -1743,7 +1763,7 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
                 "expires_at": raw.get("expires_at"),
                 "device_id": raw.get("device_id"),
                 "proxy_used": raw.get("proxy_used"),
-                "email_source": source,
+                "email_source": account_source,
                 "extra_json": json.dumps({"imported_registered": True}, ensure_ascii=False),
                 "codex_status": raw.get("codex_status") or "",
                 "codex_error": raw.get("codex_error"),
@@ -1862,16 +1882,25 @@ def get_outlook_by_email(email: str) -> dict | None:
 # generic_api email pool
 # ============================================================
 
-def import_generic_api_emails(records: list[dict]) -> tuple[int, int]:
+def _generic_api_source_matches(row: dict, source: str | None = None) -> bool:
+    requested = str(source or "").strip().lower().rstrip(".")
+    return not requested or requested == GENERIC_API_SOURCE or _generic_api_row_source(row) == requested
+
+
+def import_generic_api_emails(records: list[dict], source: str | None = None) -> tuple[int, int]:
     """
     批量导入通用 API 取码邮箱。
     records 元素：{email, code_url}
     返回 (新增数, 跳过数)。
     """
+    default_source = str(source or "").strip().lower()
     with _LOCK:
         rows = _load_generic_api_emails()
         inserted = skipped = 0
         for raw in records:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
             email = (raw.get("email") or "").strip()
             code_url = (raw.get("code_url") or raw.get("url") or "").strip()
             if not email or not code_url:
@@ -1880,10 +1909,13 @@ def import_generic_api_emails(records: list[dict]) -> tuple[int, int]:
             if _find_by_email(rows, email):
                 skipped += 1
                 continue
+            explicit_source = str(raw.get("source") or default_source or "").strip().lower()
+            fallback = explicit_source if is_dynamic_source(explicit_source) else GENERIC_API_SOURCE
             row = {
                 "id": _next_id(rows),
                 "email": email,
                 "code_url": code_url,
+                "source": source_for_pickup_url(code_url, fallback=fallback),
                 "status": "available",
                 "used_at": None,
                 "note": None,
@@ -1896,11 +1928,14 @@ def import_generic_api_emails(records: list[dict]) -> tuple[int, int]:
         return inserted, skipped
 
 
-def claim_next_generic_api_email() -> dict | None:
+def claim_next_generic_api_email(source: str | None = None) -> dict | None:
     """原子领取一个可用通用 API 邮箱并标记为 used。"""
     with _LOCK:
         rows = sorted(_load_generic_api_emails(), key=lambda x: int(x.get("id") or 0))
-        row = next((r for r in rows if r.get("status") == "available"), None)
+        row = next(
+            (r for r in rows if r.get("status") == "available" and _generic_api_source_matches(r, source)),
+            None,
+        )
         if row is None:
             return None
         row["status"] = "used"
@@ -1910,12 +1945,17 @@ def claim_next_generic_api_email() -> dict | None:
         return _decorate_generic_api_email(row)
 
 
-def release_generic_api_email(email: str, status: str = "available", note: str | None = None) -> None:
+def release_generic_api_email(
+    email: str,
+    status: str = "available",
+    note: str | None = None,
+    source: str | None = None,
+) -> None:
     """把通用 API 邮箱状态改回 available，或标记为 failed/used。"""
     with _LOCK:
         rows = _load_generic_api_emails()
         row = _find_by_email(rows, email)
-        if row is None:
+        if row is None or not _generic_api_source_matches(row, source):
             return
         row["status"] = status
         if status == "available":
@@ -1927,14 +1967,18 @@ def release_generic_api_email(email: str, status: str = "available", note: str |
         _save_generic_api_emails(rows)
 
 
-def release_unconsumed_generic_api_email(email: str, note: str | None = None) -> bool:
+def release_unconsumed_generic_api_email(
+    email: str,
+    note: str | None = None,
+    source: str | None = None,
+) -> bool:
     """原子回收未生成本地账号且仍为 used 的通用 API 邮箱。"""
     with _LOCK:
         if _find_by_email(_load_accounts(), email) is not None:
             return False
         rows = _load_generic_api_emails()
         row = _find_by_email(rows, email)
-        if row is None or row.get("status") != "used":
+        if row is None or row.get("status") != "used" or not _generic_api_source_matches(row, source):
             return False
         row["status"] = "available"
         row["used_at"] = None
@@ -1944,19 +1988,26 @@ def release_unconsumed_generic_api_email(email: str, note: str | None = None) ->
         return True
 
 
-def delete_generic_api_email(email: str) -> bool:
+def delete_generic_api_email(email: str, source: str | None = None) -> bool:
     """从通用 API 邮箱池彻底删除一个邮箱。"""
     with _LOCK:
         rows = _load_generic_api_emails()
         target = (email or "").lower()
-        new_rows = [r for r in rows if (r.get("email") or "").lower() != target]
+        new_rows = [
+            r for r in rows
+            if (r.get("email") or "").lower() != target or not _generic_api_source_matches(r, source)
+        ]
         if len(new_rows) == len(rows):
             return False
         _save_generic_api_emails(new_rows)
         return True
 
 
-def list_generic_api_email_pool(status: str | None = None, limit: int = 500) -> list[dict]:
+def list_generic_api_email_pool(
+    status: str | None = None,
+    limit: int = 500,
+    source: str | None = None,
+) -> list[dict]:
     with _LOCK:
         account_by_email = {
             (a.get("email") or "").lower(): a
@@ -1965,18 +2016,46 @@ def list_generic_api_email_pool(status: str | None = None, limit: int = 500) -> 
         rows = _load_generic_api_emails()
         if status:
             rows = [r for r in rows if r.get("status") == status]
+        if source and str(source).strip().lower().rstrip(".") != GENERIC_API_SOURCE:
+            rows = [r for r in rows if _generic_api_source_matches(r, source)]
         rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
         return [_decorate_generic_api_email(r, account_by_email) for r in rows[:limit]]
 
 
-def generic_api_email_pool_summary() -> dict:
+def generic_api_email_pool_summary(source: str | None = None) -> dict:
     with _LOCK:
         out = {"available": 0, "used": 0, "failed": 0}
-        for row in _load_generic_api_emails():
+        rows = _load_generic_api_emails()
+        if source and str(source).strip().lower().rstrip(".") != GENERIC_API_SOURCE:
+            rows = [r for r in rows if _generic_api_source_matches(r, source)]
+        for row in rows:
             status = row.get("status") or "available"
             out[status] = out.get(status, 0) + 1
         out["total"] = sum(v for k, v in out.items() if k != "total")
         return out
+
+
+def generic_api_source_summaries() -> dict[str, dict]:
+    """Return aggregate and per-domain counts for two-part pickup records."""
+    with _LOCK:
+        groups: dict[str, dict] = {
+            GENERIC_API_SOURCE: {"available": 0, "used": 0, "failed": 0}
+        }
+        for row in _load_generic_api_emails():
+            source = _generic_api_row_source(row)
+            groups.setdefault(source, {"available": 0, "used": 0, "failed": 0})
+            status = row.get("status") or "available"
+            groups[GENERIC_API_SOURCE][status] = groups[GENERIC_API_SOURCE].get(status, 0) + 1
+            if source != GENERIC_API_SOURCE:
+                groups[source][status] = groups[source].get(status, 0) + 1
+        for summary in groups.values():
+            summary["total"] = sum(v for k, v in summary.items() if k != "total")
+        return dict(sorted(groups.items(), key=lambda item: item[0]))
+
+
+def list_generic_api_sources() -> list[str]:
+    """List concrete URL-domain source names currently in the pool."""
+    return [source for source in generic_api_source_summaries() if source != GENERIC_API_SOURCE]
 
 
 def get_generic_api_email_by_email(email: str) -> dict | None:

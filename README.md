@@ -47,7 +47,7 @@ ChatGPT / OpenAI 账号自动注册与 Codex OAuth 授权工具。当前项目�
 - Outlook 邮箱池：`email----password----clientId----refreshToken`
 - Cloudflare 域名邮箱 + QQ 邮箱 IMAP 收信（`cloudflare_domain`）
 - Cloudflare Worker 临时邮箱：自动创建 + JWT 取码（`cloudflare`，兼容 cloudflare_temp_email）
-- 通用 API 邮箱：`email----取码地址`
+- 通用 API 邮箱：`email----取件地址`；导入后按取件地址的域名自动形成来源，例如 `mail.ai1998.xyz`
 - GPTMail 临时邮箱 API：运行时随机生成邮箱并自动收取验证码
 - `EMAIL_SOURCE` 支持多个来源组合，例如：
 
@@ -175,6 +175,10 @@ email----password----clientId----refreshToken
 ```text
 email----code_url
 ```
+
+导入时会从 `code_url` 提取主机名作为独立来源。例如取件地址为
+`https://mail.ai1998.xyz/messages/...`，邮箱池和注册来源中会出现 `mail.ai1998.xyz`；
+`generic_api` 仍可用于汇总领取所有两段式邮箱。
 
 在 `config/email.py` 设置：
 
