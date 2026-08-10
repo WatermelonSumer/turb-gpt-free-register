@@ -595,6 +595,10 @@ EDITABLE_FIELDS = [
         "label": "单号等短信(秒)", "help": "单个号等待短信到达的最长秒数，超时则换号",
     },
     {
+        "key": "SMS_MAX_PRICE", "file": "codex.py", "type": "str", "group": "接码平台",
+        "label": "最高接码单价", "help": "单个号愿意支付的最高价格，留空=不限；透传给 GrizzlySMS/SMSBower 的 maxPrice 参数",
+    },
+    {
         "key": "SMS_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
         "label": "GrizzlySMS API密钥", "help": "GrizzlySMS 平台 API Key，保存在 .env（SMS_API_KEY），不写回 config/*.py",
         "storage": "env", "secret": True,
