@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import errno
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from config import env_loader
@@ -8,6 +11,29 @@ from webui import config_editor
 
 
 class ConfigDefaultFallbackTests(unittest.TestCase):
+    def test_write_env_values_falls_back_for_bind_mounted_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text('KEEP="old"\nPROXY_POOL="old-proxy"\n', encoding="utf-8")
+            old_env_path = env_loader._ENV_PATH
+            env_loader._ENV_PATH = env_path
+            try:
+                busy = OSError(errno.EBUSY, "Device or resource busy")
+                with patch.object(type(env_path), "replace", side_effect=busy), patch.object(
+                    env_loader, "load_env"
+                ) as load_env:
+                    written = env_loader.write_env_values({"PROXY_POOL": "new-proxy"})
+            finally:
+                env_loader._ENV_PATH = old_env_path
+
+            self.assertEqual(written, ["PROXY_POOL"])
+            self.assertEqual(
+                env_path.read_text(encoding="utf-8"),
+                'KEEP="old"\nPROXY_POOL="new-proxy"\n',
+            )
+            self.assertFalse(env_path.with_suffix(".env.tmp").exists())
+            load_env.assert_called_once_with(override=True)
+
     def test_blank_env_value_uses_default_for_all_supported_types(self):
         old_loaded = env_loader._LOADED
         env_loader._LOADED = True

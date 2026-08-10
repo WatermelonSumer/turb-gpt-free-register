@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import errno
 import os
 import re
 from pathlib import Path
@@ -162,7 +163,19 @@ def write_env_values(updates: dict[str, str]) -> list[str]:
     text = "\n".join(out_lines).rstrip() + "\n"
     tmp = _ENV_PATH.with_suffix(".env.tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(_ENV_PATH)
+    try:
+        tmp.replace(_ENV_PATH)
+    except OSError as exc:
+        if exc.errno not in (errno.EBUSY, errno.EXDEV):
+            raise
+
+        # A file bind-mounted by Docker is itself a mount point, so Linux
+        # rejects rename-over-target. Write through that mount in place.
+        with _ENV_PATH.open("w", encoding="utf-8", newline="") as env_file:
+            env_file.write(text)
+            env_file.flush()
+            os.fsync(env_file.fileno())
+        tmp.unlink(missing_ok=True)
 
     # 让当前进程立刻看到新值
     load_env(override=True)
