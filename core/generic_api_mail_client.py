@@ -45,6 +45,18 @@ _YANGYANG_OPENAI_SUBJECT_HINTS = (
 )
 
 
+def _normalize_code_url(code_url: str | None) -> str:
+    """补全缺少协议头的取码地址。
+
+    导入时已在 db.import_generic_api_emails 里补过；这里兜底处理历史入库数据，
+    避免 requests 抛 MissingSchema（如 smsbower.page/api/mail/getCodeBySignature?s=...）。
+    """
+    url = str(code_url or "").strip()
+    if url and "://" not in url:
+        return "https://" + url
+    return url
+
+
 class GenericApiMailError(RuntimeError):
     """通用 API 取码邮箱错误。"""
 
@@ -499,7 +511,7 @@ def pick_account(source: str | None = None) -> GenericApiEmailAccount:
         )
     account = GenericApiEmailAccount(
         email=row["email"],
-        code_url=row["code_url"],
+        code_url=_normalize_code_url(row["code_url"]),
         source=str(row.get("source") or source or GENERIC_API_SOURCE),
     )
     _CONTEXT_CACHE[account.email] = account
@@ -537,7 +549,7 @@ def get_account_context(email: str) -> GenericApiEmailAccount | None:
         return None
     account = GenericApiEmailAccount(
         email=row["email"],
-        code_url=row["code_url"],
+        code_url=_normalize_code_url(row["code_url"]),
         source=str(row.get("source") or GENERIC_API_SOURCE),
     )
     _CONTEXT_CACHE[email] = account

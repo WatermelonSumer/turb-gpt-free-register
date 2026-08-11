@@ -1903,6 +1903,9 @@ def import_generic_api_emails(records: list[dict], source: str | None = None) ->
                 continue
             email = (raw.get("email") or "").strip()
             code_url = (raw.get("code_url") or raw.get("url") or "").strip()
+            # 补全缺少协议头的 URL（如 smsbower.page/api/mail/getCodeBySignature?s=...）
+            if code_url and "://" not in code_url:
+                code_url = "https://" + code_url
             if not email or not code_url:
                 skipped += 1
                 continue
@@ -2862,45 +2865,41 @@ def create_retry_job(
     email: str | None = None,
     account_id: int | None = None,
 ) -> tuple[dict, bool]:
-    """原子创建重试子任务；同一任务链已有活跃任务时直接复用。"""
+    """原地重置任务行用于重试，保证一个邮箱在注册列表里恒定只占一行。
+
+    历史实现会为每次重试新建子任务行（一次失败 + 三次重试 = 四行），
+    这里改为把原行重置回 pending 并累加 retry_attempt，日志文件沿用同一个。
+    """
     with _LOCK:
         rows = _load_jobs()
-        source = next((r for r in rows if int(r.get("id") or 0) == int(source_job_id)), None)
-        if source is None:
+        row = next((r for r in rows if int(r.get("id") or 0) == int(source_job_id)), None)
+        if row is None:
             raise LookupError("任务不存在")
-        if source.get("status") not in ("failed", "stopped", "cancelled"):
-            raise ValueError(f"当前状态不支持重试：{source.get('status')}")
+        if row.get("status") not in ("failed", "stopped", "cancelled"):
+            raise ValueError(f"当前状态不支持重试：{row.get('status')}")
 
-        root_id = int(source.get("root_job_id") or source.get("id"))
-        active_states = {"pending", "running", "stopping"}
-        active = next((
-            r for r in rows
-            if int(r.get("id") or 0) != int(source_job_id)
-            and int(r.get("root_job_id") or 0) == root_id
-            and r.get("status") in active_states
-        ), None)
-        if active is not None:
-            if active.get("job_type", "registration") != job_type:
-                raise ValueError(f"已有其他类型重试任务 #{active.get('id')} 在排队或运行中")
-            return dict(active), False
-
-        attempts = [
-            int(r.get("retry_attempt") or 0)
-            for r in rows
-            if int(r.get("id") or 0) == root_id or int(r.get("root_job_id") or 0) == root_id
-        ]
-        row = _new_job_row(
-            rows,
-            email_source=email_source,
-            job_type=job_type,
-            parent_job_id=int(source_job_id),
-            root_job_id=root_id,
-            retry_attempt=(max(attempts) if attempts else 0) + 1,
-            retry_action=("codex" if job_type == "codex_retry" else "registration"),
-            email=email,
-            account_id=account_id,
-        )
-        rows.append(row)
+        row["job_type"] = job_type
+        row["email_source"] = email_source
+        row["retry_attempt"] = int(row.get("retry_attempt") or 0) + 1
+        row["retry_action"] = "codex" if job_type == "codex_retry" else "registration"
+        row["status"] = "pending"
+        row["error_message"] = None
+        row["started_at"] = None
+        row["completed_at"] = None
+        # Codex 补跑必须锁定既有账号；完整重注册要放开旧绑定，重新领号。
+        if job_type == "codex_retry":
+            row["email"] = email or row.get("email")
+            row["account_id"] = account_id if account_id is not None else row.get("account_id")
+        else:
+            row["email"] = None
+            row["account_id"] = None
+        # 原地重试不再产生父子关系；root_job_id 保留以兼容历史链式数据的查询。
+        row["parent_job_id"] = None
+        log_file = str(row.get("log_file") or "")
+        if not log_file:
+            log_file = str(_LOG_DIR / f"{row.get('job_uuid') or uuid.uuid4()}.log")
+            row["log_file"] = log_file
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         _save_jobs(rows)
         return dict(row), True
 
