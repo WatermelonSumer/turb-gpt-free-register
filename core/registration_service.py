@@ -582,6 +582,21 @@ def retry_job(job_id: int, workers: int | None = None) -> dict:
             "job": job,
         }
 
+    # 原地重试复用同一个日志文件（append 模式），写一条分隔线区分轮次。
+    try:
+        log_path = Path(str(job.get("log_file") or ""))
+        if str(log_path):
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"\n{'=' * 72}\n"
+                    f"第 {job.get('retry_attempt') or 1} 次重试（{action}）"
+                    f" @ {datetime.now().isoformat(timespec='seconds')}\n"
+                    f"{'=' * 72}\n"
+                )
+    except Exception:
+        logger.exception("[Job %s] 写入重试分隔线失败", job.get("id"))
+
     try:
         if action == "codex":
             db.update_account_codex_status(email, "retrying", None)

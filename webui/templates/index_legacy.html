@@ -1127,7 +1127,7 @@ function renderJobs() {
   $('#jobsBody').innerHTML = rows.map(j => `
     <tr>
       <td><input type="checkbox" class="job-row-check" data-job-id="${esc(j.id)}" ${JOB_SELECTED.has(Number(j.id)) ? 'checked' : ''} ${['running','stopping'].includes(j.status) ? 'disabled title="运行中的任务不能选择"' : ''}></td>
-      <td class="muted">#${esc(j.id)}${j.parent_job_id ? `<div class="sub-cell" title="重试自任务 #${esc(j.parent_job_id)}">↳ #${esc(j.parent_job_id)} · ${esc(j.retry_attempt || 1)}</div>` : ''}</td>
+      <td class="muted">#${esc(j.id)}${j.retry_attempt ? `<div class="sub-cell" title="该任务已原地重试 ${esc(j.retry_attempt)} 次">↻ 第 ${esc(j.retry_attempt)} 次重试</div>` : ''}</td>
       <td>${pill(j.display_status || j.status)}</td>
       <td title="${esc(j.email || '-')}">${esc(j.email || '-')}</td>
       <td class="muted" title="${esc(j.started_at || '-')}">${esc(j.started_at || '-')}</td>
